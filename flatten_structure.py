@@ -43,14 +43,33 @@ SKIP_PARAMS = {
 # GLOBAL COUNTER (resets per service)
 _GLOBAL_INDEX_COUNTER = 0
 
+from typing import List, Dict, Any
+from odxtools.database import Database
+from odx_utils import (
+    normalize_name,
+    safe_resolve,
+    get_child_parameters_from_dop,
+    get_physical_type,
+    get_scale_offset_unit
+)
+
+# Parameters to skip
+SKIP_PARAMS = {
+    "SID", "SID_RQ", "SID_PR",
+    "SERVICEID", "REQUESTSERVICEID", "RESPONSESERVICEID",
+    "DID", "DATAIDENTIFIER", "DATA_IDENTIFIER",
+    "RECORDDATAIDENTIFIER", "RECORD_DATA_IDENTIFIER",
+    "RID", "ROUTINEIDENTIFIER", "ROUTINE_IDENTIFIER",
+    "SUBFUNCTION", "SF"
+}
+
+
 def flatten_parameter(
     param,
     db: Database,
     parent: str,
     service_name: str,
-    struct_leaf_total=None,
     struct_depth=1,
-    index_map=None,
     struct_hierarchy=None,
     struct_hierarchy_detail=None,
     structure_registry=None
@@ -68,7 +87,7 @@ def flatten_parameter(
 
     full_path = f"{parent}.{pname}" if parent else f"{service_name}.{pname}"
 
-    # -------- Resolve DOP --------
+    # ------------------ Resolve DOP ------------------
     dop = None
     if getattr(param, "dop_ref", None):
         dop = safe_resolve(param.dop_ref, db)
@@ -83,7 +102,7 @@ def flatten_parameter(
         para_type = "TABLEROW_PA"
 
     # =====================================================================
-    # LEAF PARAMETER
+    #                LEAF PARAMETER
     # =====================================================================
     if not has_children:
         scale, offset, unit = get_scale_offset_unit(dop)
@@ -97,18 +116,13 @@ def flatten_parameter(
         except:
             pass
 
-        # ---------- FINAL INDEX ----------
-        array_index = 0
-        if index_map and full_path in index_map:
-            array_index = index_map[full_path]
-
         results.append({
             "FullPath": full_path,
 
             "serviceMeta": {
                 "paraType": para_type,
-                "structureKey": "",
-                "parameterIndexInsideStructure": array_index,
+                # index will be assigned later if part of structure
+                "parameterIndexInsideStructure": 0,
                 "arrayName": getattr(param, "short_name", ""),
                 "topStruct": parent
             },
@@ -128,7 +142,7 @@ def flatten_parameter(
         return results
 
     # =====================================================================
-    # STRUCTURE PARAMETER
+    #                STRUCTURE PARAMETER
     # =====================================================================
     if struct_hierarchy is None:
         struct_hierarchy = [service_name]
@@ -148,9 +162,7 @@ def flatten_parameter(
         "longName": current_struct_long
     }]
 
-    # =================================================================
-    # FIRST PASS — collect leaves
-    # =================================================================
+    # -------- SINGLE PASS: collect all leaves --------
     temp = []
     for sub in children:
         temp.extend(
@@ -166,14 +178,12 @@ def flatten_parameter(
             )
         )
 
-    # =================================================================
-    # BUILD INDEX MAP (THIS IS THE PART YOU WERE MISSING)
-    # =================================================================
-    index_map = {}
-    for i, leaf in enumerate(temp, start=0):
-        index_map[leaf.get("FullPath", "")] = i
+    # -------- ASSIGN FINAL, GUARANTEED INDEX --------
+    for i, leaf in enumerate(temp):
+        sm = leaf.setdefault("serviceMeta", {})
+        sm["parameterIndexInsideStructure"] = i
 
-    # register structure metadata
+    # -------- Register structure metadata --------
     structure_key = ".".join(new_hierarchy)
 
     structure_registry[structure_key] = {
@@ -184,22 +194,4 @@ def flatten_parameter(
         "structureHierarchyDetailed": new_hierarchy_detail
     }
 
-    # =================================================================
-    # SECOND PASS — flatten again with correct indexes
-    # =================================================================
-    for sub in children:
-        results.extend(
-            flatten_parameter(
-                sub,
-                db,
-                full_path,
-                service_name,
-                struct_depth=struct_depth + 1,
-                index_map=index_map,
-                struct_hierarchy=new_hierarchy,
-                struct_hierarchy_detail=new_hierarchy_detail,
-                structure_registry=structure_registry
-            )
-        )
-
-    return results
+    return temp
