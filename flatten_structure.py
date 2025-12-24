@@ -1,50 +1,6 @@
 from typing import List, Dict, Any
 from odxtools.database import Database
 
-# ----------------- IMPORT HELPERS FROM YOUR EXISTING FILE -----------------
-# normalize_name
-# safe_resolve
-# get_child_parameters_from_dop
-# get_scale_offset_unit
-# get_physical_type
-# count_leaf_parameters
-# --------------------------------------------------------------------------
-
-_GLOBAL_INDEX_COUNTER = 0
-
-def reset_global_index():
-    global _GLOBAL_INDEX_COUNTER
-    _GLOBAL_INDEX_COUNTER = 0
-
-
-SKIP_PARAMS = {
-    "SID",
-    "SID_RQ",
-    "SID_PR",
-    "SERVICE_ID",
-    "REQUESTSERVICEID",
-    "RESPONSESERVICEID",
-
-    "DID",
-    "DATAIDENTIFIER",
-    "DATA_IDENTIFIER",
-    "RECORDDATAIDENTIFIER",
-    "RECORD_DATA_IDENTIFIER",
-
-    "RID",
-    "ROUTINEIDENTIFIER",
-    "ROUTINE_IDENTIFIER",
-
-    "SUBFUNCTION",
-    "SF",
-}
-
-
-# GLOBAL COUNTER (resets per service)
-_GLOBAL_INDEX_COUNTER = 0
-
-from typing import List, Dict, Any
-from odxtools.database import Database
 from odx_utils import (
     normalize_name,
     safe_resolve,
@@ -53,12 +9,21 @@ from odx_utils import (
     get_scale_offset_unit
 )
 
+# =========================
+# GLOBAL GROUP INDEX
+# =========================
+# Used for ECUs where OEM did NOT define structure,
+# but logically parameters form indexed arrays (Whl0..Whl3)
+GROUP_INDEX: Dict[str, int] = {}
+
 # Parameters to skip
 SKIP_PARAMS = {
     "SID", "SID_RQ", "SID_PR",
     "SERVICEID", "REQUESTSERVICEID", "RESPONSESERVICEID",
+
     "DID", "DATAIDENTIFIER", "DATA_IDENTIFIER",
     "RECORDDATAIDENTIFIER", "RECORD_DATA_IDENTIFIER",
+
     "RID", "ROUTINEIDENTIFIER", "ROUTINE_IDENTIFIER",
     "SUBFUNCTION", "SF"
 }
@@ -74,6 +39,15 @@ def flatten_parameter(
     struct_hierarchy_detail=None,
     structure_registry=None
 ):
+    """
+    Universal parameter flattener.
+    Handles:
+      - Simple (leaf) parameters
+      - Structured parameters
+      - Nested structures
+      - Table parameters
+    """
+
     results = []
 
     if structure_registry is None:
@@ -107,6 +81,22 @@ def flatten_parameter(
     if not has_children:
         scale, offset, unit = get_scale_offset_unit(dop)
 
+        # -----------------------------
+        # ARRAY INDEX MANAGEMENT
+        # -----------------------------
+        parent_key = parent or service_name
+
+        global GROUP_INDEX
+        if parent_key not in GROUP_INDEX:
+            GROUP_INDEX[parent_key] = 0
+        else:
+            GROUP_INDEX[parent_key] += 1
+
+        array_index = GROUP_INDEX[parent_key]
+
+        # -----------------------------
+        # Bit length extraction
+        # -----------------------------
         bitlen = 0
         try:
             if hasattr(dop, "diag_coded_type") and hasattr(dop.diag_coded_type, "bit_length"):
@@ -121,8 +111,8 @@ def flatten_parameter(
 
             "serviceMeta": {
                 "paraType": para_type,
-                # index will be assigned later if part of structure
-                "parameterIndexInsideStructure": 0,
+                "structureKey": "",
+                "parameterIndexInsideStructure": array_index,
                 "arrayName": getattr(param, "short_name", ""),
                 "topStruct": parent
             },
@@ -159,10 +149,10 @@ def flatten_parameter(
     new_hierarchy = struct_hierarchy + [current_struct_short]
     new_hierarchy_detail = struct_hierarchy_detail + [{
         "shortName": current_struct_short,
-        "longName": current_struct_long
+        "LongName": current_struct_long
     }]
 
-    # -------- SINGLE PASS: collect all leaves --------
+    # -------- Collect all leaves --------
     temp = []
     for sub in children:
         temp.extend(
@@ -178,7 +168,7 @@ def flatten_parameter(
             )
         )
 
-    # -------- ASSIGN FINAL, GUARANTEED INDEX --------
+    # -------- Assign Index deterministically --------
     for i, leaf in enumerate(temp):
         sm = leaf.setdefault("serviceMeta", {})
         sm["parameterIndexInsideStructure"] = i
