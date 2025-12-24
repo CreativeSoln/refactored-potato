@@ -1,3 +1,116 @@
+def find_did_in_params(params):
+    if not params:
+        return None
+
+    for p in params:
+        name = normalize_name(getattr(p, "short_name", ""))
+
+        if name in ["DID", "DATAIDENTIFIER", "RECORDDATAIDENTIFIER", "ID"]:
+            # Try standard coded value
+            v = getattr(p, "coded_value", None)
+
+            # Fallback raw
+            if v is None:
+                v = getattr(p, "coded_value_raw", None)
+
+            if v is None:
+                continue
+
+            try:
+                return int(v)
+            except Exception:
+                pass
+
+    return None
+
+
+def extract_normal_dids(ecu, db: Database, target_list: List[Dict[str, Any]], only_sid: str):
+
+    for svc in getattr(ecu, "services", []):
+
+        sid = detect_service_sid(svc)
+        if sid != only_sid:
+            continue
+
+        svc_name = getattr(svc, "short_name", "")
+        desc = getattr(svc, "long_name", "")
+        semantic = get_semantic(svc)
+
+        req = getattr(svc, "request", None)
+
+        # Collect POS response parameters
+        pos_params = []
+        for pr in getattr(svc, "positive_responses", []) or []:
+            pos_params.extend(getattr(pr, "parameters", []) or [])
+
+        req_params = getattr(req, "parameters", []) if req else []
+        all_params = (req_params or []) + (pos_params or [])
+
+        if not all_params:
+            continue
+
+        # ---------------------------------------------------------
+        # DID DETECTION (Supports: POS → REQUEST → FALLBACK ALL)
+        # ---------------------------------------------------------
+        did_val = None
+
+        # 1️⃣ Normal — DID in Positive Response
+        did_val = find_did_in_params(pos_params)
+
+        # 2️⃣ Some ECUs — DID only in Request
+        if did_val is None:
+            did_val = find_did_in_params(req_params)
+
+        # 3️⃣ Last fallback — any parameter
+        if did_val is None:
+            did_val = find_did_in_params(all_params)
+
+        if did_val is None:
+            print(f"[WARN] NO DID FOUND for Service: {svc_name}")
+            continue
+
+        did_hex = f"0x{int(did_val):04X}"
+
+        # ---------------------------------------------------------
+        # PARAMETER FLATTENING
+        # ---------------------------------------------------------
+        param_blocks = []
+        structure_registry = {}
+
+        source_params = []
+
+        # Prefer POS → then REQ → then ALL
+        if pos_params:
+            source_params = pos_params
+        elif req_params:
+            source_params = req_params
+        else:
+            source_params = all_params
+
+        for p in source_params:
+            param_blocks.extend(
+                flatten_parameter(
+                    p,
+                    db,
+                    "",
+                    svc_name,
+                    structure_registry=structure_registry
+                )
+            )
+
+        target_list.append({
+            "ECUVariant": normalize_name(ecu.short_name),
+            "autoBaseVariant": auto_base_variant(ecu.short_name),
+            "DID": did_hex,
+            "ServiceName": svc_name,
+            "Semantic": semantic,
+            "Description": desc,
+            "structureMetadata": structure_registry,
+            "Parameters": param_blocks
+        })
+
+
+
 CkCert cert;
 
     // Load your certificate
