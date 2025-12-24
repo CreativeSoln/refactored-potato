@@ -10,6 +10,13 @@ from odxtools.database import Database
 # count_leaf_parameters
 # --------------------------------------------------------------------------
 
+_GLOBAL_INDEX_COUNTER = 0
+
+def reset_global_index():
+    global _GLOBAL_INDEX_COUNTER
+    _GLOBAL_INDEX_COUNTER = 0
+
+
 SKIP_PARAMS = {
     "SID",
     "SID_RQ",
