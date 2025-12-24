@@ -1,3 +1,26 @@
+SKIP_PARAMS = {
+    "SID",
+    "SID_RQ",
+    "SID_PR",
+    "SERVICE_ID",
+    "REQUESTSERVICEID",
+    "RESPONSESERVICEID",
+
+    "DID",
+    "DATAIDENTIFIER",
+    "DATA_IDENTIFIER",
+    "RECORDDATAIDENTIFIER",
+    "RECORD_DATA_IDENTIFIER",
+
+    "RID",
+    "ROUTINEIDENTIFIER",
+    "ROUTINE_IDENTIFIER",
+
+    "SUBFUNCTION",
+    "SF",
+}
+
+
 def _looks_like_did(name: str):
     if not name:
         return False
