@@ -22,17 +22,22 @@ for idx, leaf in enumerate(temp):
 
 
 
+# GLOBAL COUNTER (resets per service)
+_GLOBAL_INDEX_COUNTER = 0
+
+
 def flatten_parameter(
     param,
     db: Database,
     parent: str,
     service_name: str,
-    struct_leaf_total=None,
     struct_depth=1,
     struct_hierarchy=None,
     struct_hierarchy_detail=None,
     structure_registry=None
 ):
+    global _GLOBAL_INDEX_COUNTER
+
     results = []
 
     if structure_registry is None:
@@ -61,7 +66,7 @@ def flatten_parameter(
         para_type = "TABLEROW_PA"
 
     # =====================================================================
-    #                LEAF PARAMETER
+    #                LEAF PARAMETER  (DIRECT PARAMETER)
     # =====================================================================
     if not has_children:
         scale, offset, unit = get_scale_offset_unit(dop)
@@ -75,13 +80,17 @@ def flatten_parameter(
         except:
             pass
 
+        # ---------- GUARANTEED ARRAY INDEX ----------
+        array_index = _GLOBAL_INDEX_COUNTER
+        _GLOBAL_INDEX_COUNTER += 1
+
         results.append({
             "FullPath": full_path,
 
             "serviceMeta": {
                 "paraType": para_type,
                 "structureKey": "",
-                "parameterIndexInsideStructure": 0,      # temporary, will fix later
+                "parameterIndexInsideStructure": array_index,
                 "arrayName": getattr(param, "short_name", ""),
                 "topStruct": parent
             },
@@ -137,18 +146,11 @@ def flatten_parameter(
             )
         )
 
-    # -------- Assign deterministic indexes --------
-    for idx, leaf in enumerate(temp):
-        sm = leaf.setdefault("serviceMeta", {})
-        sm["parameterIndexInsideStructure"] = idx
-
     # -------- Register structure --------
-    struct_leaf_total = len(temp)
-
     structure_key = ".".join(new_hierarchy)
 
     structure_registry[structure_key] = {
-        "parameterCountInsideStructure": struct_leaf_total,
+        "parameterCountInsideStructure": len(temp),
         "structureLevelDepth": struct_depth + 1,
         "structureHierarchy": new_hierarchy,
         "structureHierarchyPath": structure_key,
