@@ -43,19 +43,18 @@ SKIP_PARAMS = {
 # GLOBAL COUNTER (resets per service)
 _GLOBAL_INDEX_COUNTER = 0
 
-
 def flatten_parameter(
     param,
     db: Database,
     parent: str,
     service_name: str,
+    struct_leaf_total=None,
     struct_depth=1,
+    index_map=None,
     struct_hierarchy=None,
     struct_hierarchy_detail=None,
     structure_registry=None
 ):
-    global _GLOBAL_INDEX_COUNTER
-
     results = []
 
     if structure_registry is None:
@@ -69,7 +68,7 @@ def flatten_parameter(
 
     full_path = f"{parent}.{pname}" if parent else f"{service_name}.{pname}"
 
-    # ------------------ Resolve DOP ------------------
+    # -------- Resolve DOP --------
     dop = None
     if getattr(param, "dop_ref", None):
         dop = safe_resolve(param.dop_ref, db)
@@ -84,7 +83,7 @@ def flatten_parameter(
         para_type = "TABLEROW_PA"
 
     # =====================================================================
-    #                LEAF PARAMETER  (DIRECT PARAMETER)
+    # LEAF PARAMETER
     # =====================================================================
     if not has_children:
         scale, offset, unit = get_scale_offset_unit(dop)
@@ -98,9 +97,10 @@ def flatten_parameter(
         except:
             pass
 
-        # ---------- GUARANTEED ARRAY INDEX ----------
-        array_index = _GLOBAL_INDEX_COUNTER
-        _GLOBAL_INDEX_COUNTER += 1
+        # ---------- FINAL INDEX ----------
+        array_index = 0
+        if index_map and full_path in index_map:
+            array_index = index_map[full_path]
 
         results.append({
             "FullPath": full_path,
@@ -128,7 +128,7 @@ def flatten_parameter(
         return results
 
     # =====================================================================
-    #                STRUCTURE PARAMETER
+    # STRUCTURE PARAMETER
     # =====================================================================
     if struct_hierarchy is None:
         struct_hierarchy = [service_name]
@@ -148,7 +148,9 @@ def flatten_parameter(
         "longName": current_struct_long
     }]
 
-    # -------- Collect ALL leafs --------
+    # =================================================================
+    # FIRST PASS — collect leaves
+    # =================================================================
     temp = []
     for sub in children:
         temp.extend(
@@ -164,7 +166,14 @@ def flatten_parameter(
             )
         )
 
-    # -------- Register structure --------
+    # =================================================================
+    # BUILD INDEX MAP (THIS IS THE PART YOU WERE MISSING)
+    # =================================================================
+    index_map = {}
+    for i, leaf in enumerate(temp, start=0):
+        index_map[leaf.get("FullPath", "")] = i
+
+    # register structure metadata
     structure_key = ".".join(new_hierarchy)
 
     structure_registry[structure_key] = {
@@ -175,5 +184,22 @@ def flatten_parameter(
         "structureHierarchyDetailed": new_hierarchy_detail
     }
 
-    results.extend(temp)
+    # =================================================================
+    # SECOND PASS — flatten again with correct indexes
+    # =================================================================
+    for sub in children:
+        results.extend(
+            flatten_parameter(
+                sub,
+                db,
+                full_path,
+                service_name,
+                struct_depth=struct_depth + 1,
+                index_map=index_map,
+                struct_hierarchy=new_hierarchy,
+                struct_hierarchy_detail=new_hierarchy_detail,
+                structure_registry=structure_registry
+            )
+        )
+
     return results
