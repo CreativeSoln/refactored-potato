@@ -1,3 +1,40 @@
+CkCert cert;
+
+    // Load your certificate
+    bool success = cert.LoadFromFile("myCert.der");
+    if (!success) {
+        printf("Failed to load cert\n");
+        return 0;
+    }
+
+    // --- Put your Extension OID here ---
+    const char *oid = "1.3.6.1.4.1.13159.1.2.5";   // example from your screenshot
+
+    CkBinData bd;
+    success = cert.GetExtensionVal(oid, bd);
+    if (!success) {
+        printf("Extension not found\n");
+        return 0;
+    }
+
+    // bd now contains DER for: OCTET STRING
+    CkAsn asn;
+    success = asn.LoadDerBd(bd);
+    if (!success) {
+        printf("ASN load failed\n");
+        return 0;
+    }
+
+    // If it is a simple printable OCTET STRING
+    printf("Value: %s\n", asn.value());     // should print "dev" in your case
+
+    // If it’s nested, you may need another decode:
+    if (asn.get_NumSubItems() > 0) {
+        CkAsn *inner = asn.GetSubItem(0);
+        printf("Inner value: %s\n", inner->value());
+        delete inner;
+    }
+
 def flatten_parameter(
     param,
     db: Database,
