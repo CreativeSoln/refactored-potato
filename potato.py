@@ -1,3 +1,17 @@
+from typing import List, Dict, Any
+from odxtools.database import Database
+
+# ----------------- IMPORT HELPERS FROM YOUR EXISTING FILE -----------------
+# normalize_name
+# safe_resolve
+# get_child_parameters_from_dop
+# get_scale_offset_unit
+# get_physical_type
+# count_leaf_parameters
+# --------------------------------------------------------------------------
+
+
+
 def flatten_parameter(
     param,
     db: Database,
@@ -52,9 +66,10 @@ def flatten_parameter(
         except:
             pass
 
-        array_index = index_map.get(full_path, len(index_map))
-        # if index_map and full_path in index_map:
-        #     array_index = index_map[full_path]
+        # -------- FINAL, RELIABLE INDEX LOGIC --------
+        array_index = 0
+        if index_map:
+            array_index = index_map.get(full_path, len(index_map))
 
         results.append({
             "FullPath": full_path,
@@ -134,13 +149,13 @@ def flatten_parameter(
     # -------- Assign Stable Index --------
     index_map = {}
     for i, leaf in enumerate(temp):
-        idx = i
-        index_map[leaf.get("FullPath", "")] = idx
+        path = leaf.get("FullPath", "")
+        index_map[path] = i
 
-        sm = leaf.setdefault("serviceMeta", {})
-        sm["parameterIndexInsideStructure"] = idx
+        leaf.setdefault("serviceMeta", {})
+        leaf["serviceMeta"]["parameterIndexInsideStructure"] = i
 
-    # -------- Second traversal (real output) --------
+    # -------- Second traversal --------
     for sub in children:
         results.extend(
             flatten_parameter(
@@ -158,7 +173,6 @@ def flatten_parameter(
         )
 
     return results
-
 
 SKIP_PARAMS = {
     "SID",
