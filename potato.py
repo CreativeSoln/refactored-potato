@@ -1,3 +1,47 @@
+def _looks_like_did(name: str):
+    if not name:
+        return False
+
+    n = normalize_name(name)
+
+    # Exact known common names
+    if n in [
+        "DID",
+        "DATAIDENTIFIER",
+        "RECORDDATAIDENTIFIER",
+        "ID",
+        "ROUTINEIDENTIFIER",
+        "ROUTINE_IDENTIFIER"
+    ]:
+        return True
+
+    # Common alternate spellings
+    alt_patterns = [
+        "DATA_IDENTIFIER",
+        "DATAID",
+        "DATA_ID",
+        "RECORD_ID",
+        "RECORD_IDENTIFIER",
+        "DID_VALUE",
+        "DIDID",
+        "DIAGDATAID",
+        "ECU_DID",
+        "ECUDID",
+        "ID_VALUE",
+        "IDENTIFIER"
+    ]
+
+    if n in alt_patterns:
+        return True
+
+    # Heuristic fallback:
+    # if name contains DID or IDENTIFIER anywhere
+    if "DID" in n or "IDENTIFIER" in n:
+        return True
+
+    return False
+
+
 def find_did_in_params(params):
     if not params:
         return None
@@ -5,7 +49,8 @@ def find_did_in_params(params):
     for p in params:
         name = normalize_name(getattr(p, "short_name", ""))
 
-        if name in ["DID", "DATAIDENTIFIER", "RECORDDATAIDENTIFIER", "ID"]:
+        #if name in ["DID", "DATAIDENTIFIER", "RECORDDATAIDENTIFIER", "ID"]:
+        if _looks_like_did(name):
             # Try standard coded value
             v = getattr(p, "coded_value", None)
 
