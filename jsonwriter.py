@@ -744,7 +744,9 @@ def parse_pdx_to_dids(pdx_path: str):
         except Exception:
             logger.exception("TABLE KEY DID FAILED")
 
-    return format_output(db, read_groups, write_groups)
+    # return format_output(db, read_groups, write_groups)
+    return convert_existing_groups_to_final_json(read_groups)
+
 
 def generate_final_odx_json(pdx_path: str):
     db = odxtools.load_file(pdx_path, use_weakrefs=True)
@@ -778,3 +780,89 @@ def generate_final_odx_json(pdx_path: str):
         ecu_blocks.append(ecu_json)
 
     return ecu_blocks[0] if len(ecu_blocks) == 1 else ecu_blocks
+
+def convert_existing_groups_to_final_json(read_groups):
+    ecu_map = {}
+
+    for g in read_groups:
+        ecu = g["ECUVariant"]
+        if ecu not in ecu_map:
+            ecu_map[ecu] = {
+                "ecuVariant": g["ECUVariant"],
+                "baseVariant": g["BaseVariant"],
+                "services": []
+            }
+
+        service_entry = {
+            "service": g["ServiceName"],
+            "did": g["DID"],
+            "semantic": g["Semantic"],
+            "description": g["Description"],
+        }
+
+        # ----------------------------
+        # TABLE → tableRow
+        # ----------------------------
+        if g.get("tableName"):
+            service_entry["selection"] = {
+                "type": "tableRow",
+                "table": {
+                    "name": g["tableName"],
+                    "rowFullXPath": g["tableRowFullXPath"]
+                }
+            }
+
+        # ----------------------------
+        # NORMAL RDBI → structureLeaf
+        # ----------------------------
+        else:
+            service_entry["selection"] = {
+                "type": "structureLeaf",
+                "structure": [
+                    {
+                        "path": p.get("FullPath", ""),
+                        "arrayIndex": p.get("serviceMeta", {}).get("parameterIndexInsideStructure", 0),
+                        "arrayName": p.get("serviceMeta", {}).get("arrayName", ""),
+                        "topStruct": p.get("serviceMeta", {}).get("topStruct", "")
+                    }
+                    for p in g["Parameters"]
+                ]
+            }
+
+        # ----------------------------
+        # FINAL PARAMETERS
+        # ----------------------------
+        final_params = []
+        for p in g["Parameters"]:
+            rm = p.get("responseMapping", {})
+            sm = p.get("serviceMeta", {})
+
+            factor = rm.get("Scale")
+            offset = rm.get("Offset")
+            if factor is None:
+                factor = 1
+            if offset is None:
+                offset = 0
+
+            final_params.append({
+                "name": rm.get("specificParaName", ""),
+                "path": p.get("FullPath", ""),
+                "arrayIndex": sm.get("parameterIndexInsideStructure", 0),
+                "dataType": rm.get("ParaType", ""),
+                "bitlength": p.get("bitLength", 0),
+                "endianness": "INTEL",
+                "scaling": {
+                    "category": "LINEAR" if rm.get("Scale") else "IDENTITY",
+                    "factor": factor,
+                    "offset": offset,
+                    "unit": rm.get("Unit", "")
+                },
+                "description": p.get("Description", "")
+            })
+
+        service_entry["finalParameters"] = final_params
+
+        ecu_map[ecu]["services"].append(service_entry)
+
+    return list(ecu_map.values())
+
