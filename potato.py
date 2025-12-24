@@ -52,9 +52,9 @@ def flatten_parameter(
         except:
             pass
 
-        array_index = 0
-        if index_map and full_path in index_map:
-            array_index = index_map[full_path]
+        array_index = index_map.get(full_path, len(index_map))
+        # if index_map and full_path in index_map:
+        #     array_index = index_map[full_path]
 
         results.append({
             "FullPath": full_path,
