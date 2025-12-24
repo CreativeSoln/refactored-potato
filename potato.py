@@ -10,6 +10,16 @@ from odxtools.database import Database
 # count_leaf_parameters
 # --------------------------------------------------------------------------
 
+# -------- Assign deterministic indexes --------
+for idx, leaf in enumerate(temp):
+    sm = leaf.setdefault("serviceMeta", {})
+    sm["parameterIndexInsideStructure"] = idx
+
+    print("INDEX ASSIGNED",
+          leaf.get("FullPath"),
+          "=>",
+          sm["parameterIndexInsideStructure"])
+
 
 
 def flatten_parameter(
