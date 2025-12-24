@@ -1,3 +1,90 @@
+def convert_existing_groups_to_final_json(read_groups):
+    ecu_map = {}
+
+    for g in read_groups:
+
+        ecu = g.get("ECUVariant") or g.get("ECU", "")
+
+        base_variant_value = (
+            g.get("BaseVariant")
+            or g.get("autoBaseVariant")
+            or g.get("baseVariant")
+            or ""
+        )
+
+        if ecu not in ecu_map:
+            ecu_map[ecu] = {
+                "ecuVariant": ecu,
+                "baseVariant": base_variant_value,
+                "services": []
+            }
+
+        service_entry = {
+            "service": g.get("ServiceName", ""),
+            "did": g.get("DID", ""),
+            "semantic": g.get("Semantic", ""),
+            "description": g.get("Description", "")
+        }
+
+        # -------- TABLE ROW --------
+        if g.get("tableName"):
+            service_entry["selection"] = {
+                "type": "tableRow",
+                "table": {
+                    "name": g["tableName"],
+                    "rowFullXPath": g.get("tableRowFullXPath", "")
+                }
+            }
+
+        # -------- STRUCTURE LEAF --------
+        else:
+            structure_list = []
+            for p in g.get("Parameters", []):
+                sm = p.get("serviceMeta", {})
+
+                structure_list.append({
+                    "path": p.get("FullPath", ""),
+                    "arrayIndex": sm.get("parameterIndexInsideStructure", 0),
+                    "arrayName": sm.get("arrayName", ""),
+                    "topStruct": sm.get("topStruct", "")
+                })
+
+            service_entry["selection"] = {
+                "type": "structureLeaf",
+                "structure": structure_list
+            }
+
+        # -------- FINAL PARAMETERS --------
+        final_params = []
+        for p in g.get("Parameters", []):
+            rm = p.get("responseMapping", {})
+            sm = p.get("serviceMeta", {})
+
+            factor = rm.get("Scale", 1)
+            offset = rm.get("Offset", 0)
+
+            final_params.append({
+                "name": rm.get("specificParaName", ""),
+                "path": p.get("FullPath", ""),
+                "arrayIndex": sm.get("parameterIndexInsideStructure", 0),
+                "dataType": rm.get("ParaType", ""),
+                "bitlength": p.get("bitLength", 0),
+                "endianness": "INTEL",
+                "scaling": {
+                    "category": "LINEAR" if rm.get("Scale") else "IDENTITY",
+                    "factor": factor,
+                    "offset": offset,
+                    "unit": rm.get("Unit", "")
+                },
+                "description": p.get("Description", "")
+            })
+
+        service_entry["finalParameters"] = final_params
+        ecu_map[ecu]["services"].append(service_entry)
+
+    return list(ecu_map.values())
+
+
 from error_handler import (
     logger,
     log_error,
