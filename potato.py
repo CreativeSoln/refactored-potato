@@ -1,3 +1,104 @@
+def _build_write_service_block(self, ecu, svc, db):
+    """
+    Handles WriteDataByIdentifier (0x2E)
+    Extracts DID + request payload parameters
+    Builds runtime simulation + metadata
+    """
+
+    sid = detect_service_sid(svc)
+    if sid != "0x2E":
+        return None
+
+    svc_name = getattr(svc, "short_name", "")
+
+    req = getattr(svc, "request", None)
+    if not req:
+        return None
+
+    params = getattr(req, "parameters", []) or []
+    if not params:
+        return None
+
+    # ------------------------------
+    # Extract DID
+    # ------------------------------
+    did_val = None
+    for p in params:
+        nm = getattr(p, "short_name", "").upper()
+        if "DID" in nm or "IDENTIFIER" in nm:
+            did_val = getattr(p, "coded_value", None)
+            break
+
+    if did_val is None:
+        return None
+
+    did_hex = f"0x{int(did_val):04X}"
+
+    # ------------------------------
+    # Extract Write Payload Fields
+    # ------------------------------
+    payload_params = []
+
+    for p in params:
+        nm = getattr(p, "short_name", "").upper()
+
+        # Skip service id + DID field
+        if "SERVICE" in nm:
+            continue
+        if "DID" in nm or "IDENTIFIER" in nm:
+            continue
+
+        payload_params.extend(
+            flatten_parameter(p, db, "", svc_name)
+        )
+
+    final_parameters = self._build_final_parameters(payload_params)
+
+    # ------------------------------
+    # Runtime Simulation
+    # ------------------------------
+    runtime = self._build_runtime_block(
+        sid,
+        did_hex,
+        final_parameters
+    )
+
+    runtime["sampleRequestHex"] += " " + runtime.pop("writePayloadHex", "")
+
+    block = {
+        "service": svc_name,
+        "sid": sid,
+        "did": did_hex,
+        "direction": "WRITE",
+        "semantic": get_semantic(svc),
+        "description": getattr(svc, "long_name", "") or "",
+
+        "security": {
+            "requiresUnlock": False,
+            "level": None
+        },
+
+        "runtime": runtime,
+
+        "selection": {
+            "type": "writePayload",
+            "structure": [
+                {
+                    "path": leaf.get("FullPath", ""),
+                    "arrayIndex": leaf.get("serviceMeta", {}).get("parameterIndexInsideStructure", 0),
+                    "arrayName": leaf.get("serviceMeta", {}).get("arrayName", ""),
+                    "topStruct": leaf.get("serviceMeta", {}).get("topStruct", "")
+                }
+                for leaf in payload_params
+            ]
+        },
+
+        "finalParameters": final_parameters
+    }
+
+    return block
+
+
 def _build_selection(self, flatten_nodes):
     return {
         "type": "structureLeaf",
