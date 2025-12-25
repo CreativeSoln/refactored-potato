@@ -14,31 +14,51 @@ from odx_utils import (
 # =========================================================
 # Helpers
 # =========================================================
-def hex_to_bytes(hex_str):
+def hex_to_bytes(hex_str: str):
     """
-    Safely convert 'AA BB CC' or '0xAA 0xBB' into bytes.
-    Ignores invalid or empty tokens instead of crashing.
+    Safely convert space-separated HEX string to bytes.
+    Ignores invalid tokens and ensures each byte is within 0-255.
     """
-    if not hex_str:
+
+    if not hex_str or not isinstance(hex_str, str):
         return b""
 
-    parts = hex_str.strip().replace("\n", " ").split()
+    parts = (
+        hex_str.replace("\n", " ")
+               .replace("\r", " ")
+               .replace("  ", " ")
+               .strip()
+               .split(" ")
+    )
+
     out = []
 
-    for x in parts:
-        if not x:
+    for p in parts:
+        p = p.strip()
+
+        # Skip blanks
+        if not p:
             continue
 
-        # allow 0x prefix
-        if x.lower().startswith("0x"):
-            x = x[2:]
+        # Ensure exactly 2 hex chars
+        if len(p) > 2:
+            # Example: "620100" ➝ split into ["62","01","00"]
+            while p:
+                chunk = p[:2]
+                p = p[2:]
+                try:
+                    out.append(int(chunk, 16))
+                except:
+                    pass
+            continue
 
-        # must be valid hex
         try:
-            out.append(int(x, 16))
-        except Exception:
-            # Instead of crashing, record as zero
-            out.append(0)
+            v = int(p, 16)
+            if 0 <= v <= 255:
+                out.append(v)
+        except:
+            # Ignore garbage values instead of crashing
+            continue
 
     return bytes(out)
 
