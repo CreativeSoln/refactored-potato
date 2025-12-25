@@ -1,3 +1,14 @@
+# ------------------------------------------------
+# WRITE DID Response Rule (ISO 14229)
+# ------------------------------------------------
+if sid == "0x2E":
+    # Response DOES NOT return payload
+    sample_response = f"{pos_sid} {did_hi} {did_lo}"
+else:
+    # READ – response may have payload
+    sample_response = f"{pos_sid} {did_hi} {did_lo} {payload_bytes}".strip()
+
+
 # -----------------------------------------------
 # Build Request / Response Header
 # -----------------------------------------------
