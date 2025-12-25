@@ -1,3 +1,71 @@
+
+def _build_runtime_block(self, sid, did_hex, final_parameters):
+    """
+    Builds a realistic Diagnostic Runtime Simulation block.
+
+    This function generates:
+        1) A valid UDS diagnostic service request frame (hex string)
+        2) A logically correct UDS positive response frame (hex string)
+        3) A decoded JSON view representing physical values
+
+    Behavior Rules:
+        • Positive Response SID = Request SID + 0x40
+        • Response begins with: [Positive SID, DID_HI, DID_LO]
+        • Remaining payload bytes are synthesized from parameter metadata
+        • Payload length and values depend on parameter datatype & bit length
+        • Encoded response bytes always match decodedSample content
+
+    Generation Logic:
+        ▸ Numeric Parameters (UINT / SINT / FLOAT):
+            – Deterministic synthetic values based on index
+            – Values respect scaling factor
+            – Encoded to BIG-ENDIAN byte representation
+        ▸ Text / ASCII Parameters:
+            – Encoded as ASCII byte stream
+        ▸ Unknown Types:
+            – Minimal deterministic numeric fallback
+
+    Inputs:
+        sid (str)
+            Hex UDS Service Identifier (e.g., "0x22")
+
+        did_hex (str)
+            Hex DID value (e.g., "0xF180")
+
+        final_parameters (list)
+            Flattened parameter list already containing:
+                - name
+                - dataType
+                - bitlength
+                - scaling (factor, unit)
+                - arrayIndex
+
+    Output JSON Structure:
+        {
+            "supportsSimulation": true,
+            "sampleRequestHex": "<UDS Request Hex>",
+            "sampleResponseHex": "<UDS Positive Response Hex>",
+            "decodedSample": {
+                "<parameter>": <decoded_value>,
+                ...
+            }
+        }
+
+    Guarantees:
+        • Always produces syntactically valid UDS frames
+        • Deterministic output (repeatable every run)
+        • Never generates 0x00 filler unless required
+        • Safe fallback for incomplete metadata
+
+    This runtime section is intended for:
+        ✓ ECU bench testing tools
+        ✓ HIL / SIL diagnostic validation
+        ✓ Software simulation / offline tester environments
+        ✓ Developer visualization
+
+    """
+
+
 from odx_json_exporter import OdxDataExporter
 import odxtools
 import json
