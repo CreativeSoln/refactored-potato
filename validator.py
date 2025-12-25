@@ -80,4 +80,29 @@ def _resolve_did_value(service):
 
     return None
 
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pdx", required=True, help="Input PDX file")
+    parser.add_argument("--json", required=True, help="Generated JSON to validate")
+
+    args = parser.parse_args()
+
+    errors = validate_json_against_pdx(args.pdx, args.json)
+
+    print("\n================ VALIDATION REPORT ================\n")
+
+    if not errors:
+        print("STATUS : PASS")
+        print("RESULT : JSON perfectly matches PDX")
+    else:
+        print("STATUS : FAIL")
+        print(f"ERROR COUNT : {len(errors)}\n")
+        for e in errors:
+            print(" -", e)
+
+    print("\n===================================================\n")
+
+
 #python odx_json_validator.py --pdx my.pdx --json output.json
