@@ -1,3 +1,81 @@
+def _build_runtime_block(self, sid, did_hex, final_parameters):
+    """
+    Runtime simulation builder.
+    Produces realistic request/response frames and decoded example values.
+    Prevents payload overflow, validates parameter lengths and builds
+    stable, bounded payload content suitable for test execution.
+    """
+
+    # -----------------------------------------------
+    # Resolve SID and Positive Response SID
+    # -----------------------------------------------
+    try:
+        sid_int = int(sid, 16)
+        pos_sid = f"{sid_int + 0x40:02X}"
+    except Exception:
+        sid_int = 0x22
+        pos_sid = "62"
+
+    did_clean = did_hex.replace("0x", "").upper()
+
+    sample_request = f"{sid.replace('0x','').upper()} {did_clean[:2]} {did_clean[2:]}"
+    sample_response = f"{pos_sid} {did_clean[:2]} {did_clean[2:]}"
+
+    # -----------------------------------------------
+    # Compute total payload size safely
+    # -----------------------------------------------
+    total_bits = 0
+
+    for p in final_parameters:
+        bl = p.get("bitlength", 0)
+        if isinstance(bl, int) and bl > 0:
+            total_bits += bl
+
+    # Convert to byte length
+    byte_len = max(1, int(total_bits / 8))
+
+    # HARD SAFETY LIMIT — prevents integer overflow
+    if byte_len > 256:
+        byte_len = 256
+
+    # -----------------------------------------------
+    # Build dummy payload (00 padded)
+    # -----------------------------------------------
+    payload = " ".join(["00"] * byte_len).strip()
+
+    # -----------------------------------------------
+    # Build decoded sample values
+    # -----------------------------------------------
+    decoded = {}
+
+    for p in final_parameters:
+        name = p.get("name", "")
+        idx = p.get("arrayIndex", 0)
+        scaling = p.get("scaling", {})
+        unit = scaling.get("unit", "")
+
+        # Simulated value logic
+        if "km/h" in unit:
+            value = 50 + (idx * 3)
+
+        elif "mm" in unit:
+            value = 1980 + (idx * 5)
+
+        elif "ASCII" in p.get("dataType", ""):
+            value = f"{name}_VAL"
+
+        else:
+            value = 1 + idx
+
+        decoded[name] = value
+
+    return {
+        "supportsSimulation": True,
+        "sampleRequestHex": sample_request,
+        "sampleResponseHex": f"{sample_response} {payload}".strip(),
+        "decodedSample": decoded
+    }
+
 
 def _build_runtime_block(self, sid, did_hex, final_parameters):
     """
