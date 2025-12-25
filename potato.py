@@ -1,3 +1,46 @@
+def export_ecu(self, db, ecu):
+    ecu_json = {
+        "meta": {
+            "schemaVersion": "1.1.0",
+            "generatedBy": "ODX_JSON_EXPORTER",
+            "generationTime": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "sourcePDX": getattr(db, "id", "UNKNOWN")
+        },
+
+        "ecuInfo": {
+            "ecuVariant": ecu.short_name,
+            "baseVariant": auto_base_variant(ecu.short_name)
+        },
+
+        "read_did_groups": [],
+        "write_did_groups": []
+    }
+
+    for svc in getattr(ecu, "services", []) or []:
+
+        # -------------------------
+        # READ DIDs (0x22)
+        # -------------------------
+        read_blk = self._build_structure_service_block(ecu, svc, db)
+        if read_blk:
+            ecu_json["read_did_groups"].append(read_blk)
+
+        # -------------------------
+        # READ — TABLE based DIDs
+        # -------------------------
+        table_items = self._build_table_row_blocks(ecu, svc, db)
+        if table_items:
+            ecu_json["read_did_groups"].extend(table_items)
+
+        # -------------------------
+        # WRITE DIDs (0x2E)
+        # -------------------------
+        write_blk = self._build_write_service_block(ecu, svc, db)
+        if write_blk:
+            ecu_json["write_did_groups"].append(write_blk)
+
+    return ecu_json
+
 def _build_write_service_block(self, ecu, svc, db):
     """
     Handles WriteDataByIdentifier (0x2E)
