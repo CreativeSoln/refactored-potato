@@ -1,3 +1,39 @@
+def _build_selection(self, flatten_nodes):
+    return {
+        "type": "structureLeaf",
+        "structure": [
+            {
+                "path": leaf.get("FullPath", ""),
+                "arrayIndex": leaf.get("serviceMeta", {}).get("parameterIndexInsideStructure", 0),
+                "arrayName": leaf.get("serviceMeta", {}).get("arrayName", ""),
+                "topStruct": leaf.get("serviceMeta", {}).get("topStruct", "")
+            }
+            for leaf in flatten_nodes
+        ]
+    }
+
+
+def _build_final_parameters(self, flatten_nodes):
+    final = []
+
+    for leaf in flatten_nodes:
+        rm = leaf.get("responseMapping", {})
+        sm = leaf.get("serviceMeta", {})
+
+        final.append({
+            "name": rm.get("specificParaName", ""),
+            "path": leaf.get("FullPath", ""),
+            "arrayIndex": sm.get("parameterIndexInsideStructure", 0),
+            "dataType": rm.get("ParaType", ""),
+            "bitlength": leaf.get("bitLength", 0),
+            "endianness": "INTEL",
+            "scaling": leaf.get("scaling", rm),
+            "description": leaf.get("Description", "")
+        })
+
+    return final
+
+
 def _build_table_row_blocks(self, ecu, svc, db):
     """
     Builds service blocks for TABLE-KEY DIDs.
