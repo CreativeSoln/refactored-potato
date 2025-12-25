@@ -79,3 +79,5 @@ def _resolve_did_value(service):
                 pass
 
     return None
+
+#python odx_json_validator.py --pdx my.pdx --json output.json
