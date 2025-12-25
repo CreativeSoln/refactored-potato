@@ -1,5 +1,122 @@
 def _build_runtime_block(self, sid, did_hex, final_parameters):
     """
+    Builds realistic diagnostic runtime simulation output.
+    Generates:
+        • Valid UDS request frame
+        • Valid UDS positive response frame
+        • Meaningful decoded runtime sample
+    Ensures:
+        • Positive SID = SID + 0x40
+        • DID preserved in response
+        • Payload reflects datatype + bit length
+        • Deterministic values (stable for SIL/HIL testing)
+    """
+
+    # -----------------------------------------------
+    # Resolve SID → Positive SID
+    # -----------------------------------------------
+    try:
+        sid_int = int(sid, 16)
+        pos_sid = f"{sid_int + 0x40:02X}"
+    except Exception:
+        sid_int = 0x22
+        pos_sid = "62"
+
+    did_clean = did_hex.replace("0x", "").upper()
+
+    request_hex = f"{sid.replace('0x','').upper()} {did_clean[:2]} {did_clean[2:]}"
+    response_header = f"{pos_sid} {did_clean[:2]} {did_clean[2:]}"
+
+    # -----------------------------------------------
+    # Build Payload Bytes
+    # -----------------------------------------------
+    response_bytes = []
+    decoded = {}
+
+    for p in final_parameters:
+        name = p.get("name", "")
+        dtype = p.get("dataType", "")
+        bitlen = p.get("bitlength", 0)
+        idx = p.get("arrayIndex", 0)
+
+        scaling = p.get("scaling", {})
+        factor = scaling.get("factor", 1) if scaling else 1
+        unit = scaling.get("unit", "")
+
+        # determine byte width safely
+        byte_width = max(1, bitlen // 8)
+        if byte_width > 8:      # safety bound
+            byte_width = 8
+
+        # =====================================================
+        # NUMERIC VALUES
+        # =====================================================
+        if "UINT" in dtype or "SINT" in dtype or "A_FLOAT" in dtype:
+            base_value = 10 + idx
+
+            try:
+                physical = base_value * (factor if factor else 1)
+            except Exception:
+                physical = base_value
+
+            if isinstance(physical, float):
+                if physical.is_integer():
+                    physical = int(physical)
+                else:
+                    physical = round(physical, 2)
+
+            decoded[name] = physical
+
+            try:
+                enc_val = int(float(physical))
+                encoded = enc_val.to_bytes(byte_width, "big", signed=False)
+            except Exception:
+                encoded = b"\x01"
+
+            for b in encoded:
+                response_bytes.append(f"{b:02X}")
+
+        # =====================================================
+        # ASCII VALUES
+        # =====================================================
+        elif "ASCII" in dtype:
+            text = f"VAL{idx+1}"
+            decoded[name] = text
+
+            enc = text.encode("ascii")
+
+            if len(enc) > byte_width:
+                enc = enc[:byte_width]
+
+            for b in enc:
+                response_bytes.append(f"{b:02X}")
+
+            while len(enc) < byte_width:
+                response_bytes.append("20")  # space padding
+
+        # =====================================================
+        # FALLBACK
+        # =====================================================
+        else:
+            value = 1 + idx
+            decoded[name] = value
+            response_bytes.append(f"{value:02X}")
+
+    # -----------------------------------------------
+    # Final Response Frame
+    # -----------------------------------------------
+    payload = " ".join(response_bytes)
+
+    return {
+        "supportsSimulation": True,
+        "sampleRequestHex": request_hex,
+        "sampleResponseHex": f"{response_header} {payload}".strip(),
+        "decodedSample": decoded
+    }
+
+
+def _build_runtime_block(self, sid, did_hex, final_parameters):
+    """
     Runtime simulation builder.
     Produces realistic request/response frames and decoded example values.
     Prevents payload overflow, validates parameter lengths and builds
