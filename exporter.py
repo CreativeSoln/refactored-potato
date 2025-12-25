@@ -42,73 +42,70 @@ class OdxDataExporter:
             return "WRITE"
         return "UNKNOWN"
 
+def _build_runtime_block(self, sid, did_hex, final_parameters):
+    try:
+        sid_int = int(sid, 16)
+        pos_sid = f"{sid_int + 0x40:02X}"
+    except:
+        pos_sid = "62"
 
-    def _build_runtime_block(self, sid, did_hex, final_parameters):
-        """
-        Build realistic runtime simulation block.
-        """
+    did_clean = did_hex.replace("0x", "").upper()
 
-        # -----------------------------------------------
-        # UDS READ example
-        # -----------------------------------------------
-        try:
-            sid_int = int(sid, 16)
-            pos_sid = f"{sid_int + 0x40:02X}"
-        except:
-            sid_int = 0x22
-            pos_sid = "62"
+    request_hex = f"{sid.replace('0x','').upper()} {did_clean[:2]} {did_clean[2:]}"
 
-        did_clean = did_hex.replace("0x", "").upper()
+    response_bytes = [pos_sid, did_clean[:2], did_clean[2:]]
+    decoded = {}
 
-        sample_request = f"{sid.replace('0x','').upper()} {did_clean[:2]} {did_clean[2:]}"
-        sample_response = f"{pos_sid} {did_clean[:2]} {did_clean[2:]}"
+    for p in final_parameters:
+        dtype = p.get("dataType", "")
+        bitlen = p.get("bitlength", 0)
+        name = p.get("name", "")
+        idx = p.get("arrayIndex", 0)
 
-        # -----------------------------------------------
-        # Payload length + dummy bytes
-        # -----------------------------------------------
-        payload_len = int(sum(p.get("bitlength", 0) for p in final_parameters) / 8)
-        payload = " ".join(["00"] * payload_len).strip()
+        factor = p.get("scaling", {}).get("factor", 1) if p.get("scaling") else 1
+        unit = p.get("scaling", {}).get("unit", "")
 
-        # -----------------------------------------------
-        # Build decoded sample
-        # -----------------------------------------------
-        decoded = {}
+        # =============================
+        #   NUMERIC VALUES
+        # =============================
+        if "UINT" in dtype or "SINT" in dtype or "A_FLOAT" in dtype:
+            base = 10 + idx
+            phys_value = round(base * factor, 2)
 
-        for p in final_parameters:
-            nm = p.get("name", "")
-            scale = (
-                p.get("scaling", {}).get("factor", 1)
-                if p.get("scaling") else 1
-            )
-            unit = (
-                p.get("scaling", {}).get("unit", "")
-                if p.get("scaling") else ""
-            )
+            decoded[name] = phys_value
 
-            idx = p.get("arrayIndex", 0)
+            byte_len = max(1, bitlen // 8)
+            hex_value = phys_value
+            if isinstance(hex_value, float):
+                hex_value = int(hex_value)
 
-            if "km/h" in unit:
-                val = 50 + (idx * 3)
+            payload = hex_value.to_bytes(byte_len, "big")
+            response_bytes.extend(f"{b:02X}" for b in payload)
 
-            elif "mm" in unit:
-                val = 1980 + (idx * 5)
+        # =============================
+        #  ASCII STRING VALUES
+        # =============================
+        elif "ASCII" in dtype:
+            text = f"{name[:6]}{idx}"
+            decoded[name] = text
 
-            elif "ASCII" in p.get("dataType", ""):
-                val = f"{nm}_VAL"
+            for c in text.encode("ascii"):
+                response_bytes.append(f"{c:02X}")
 
-            else:
-                val = 1 + idx
+        # =============================
+        #  DEFAULT FALLBACK
+        # =============================
+        else:
+            decoded[name] = idx + 1
+            response_bytes.append(f"{idx+1:02X}")
 
-            decoded[nm] = float(val) if isinstance(val, (int, float)) else val
+    return {
+        "supportsSimulation": True,
+        "sampleRequestHex": request_hex,
+        "sampleResponseHex": " ".join(response_bytes),
+        "decodedSample": decoded
+    }
 
-        block = {
-            "supportsSimulation": True,
-            "sampleRequestHex": sample_request,
-            "sampleResponseHex": (sample_response + " " + payload).strip(),
-            "decodedSample": decoded
-        }
-
-        return block
 
 
     # ========================================================
