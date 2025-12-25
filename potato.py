@@ -1,3 +1,142 @@
+def _build_table_row_blocks(self, ecu, svc, db):
+    """
+    Builds service blocks for TABLE-KEY DIDs.
+
+    Supports:
+        • table
+        • table_ref
+        • table_key_ref
+        • table_rows_raw
+        • datatype structure-based rows
+
+    Ensures finalParameters + selection populate correctly.
+    """
+
+    results = []
+    svc_name = getattr(svc, "short_name", "")
+    sid = detect_service_sid(svc)
+
+    for resp in getattr(svc, "positive_responses", []) or []:
+        for param in getattr(resp, "parameters", []) or []:
+
+            # --------------------------------------------------
+            # Resolve Table Definition (Covers All OEM Styles)
+            # --------------------------------------------------
+            table = (
+                getattr(param, "table", None)
+                or safe_resolve(getattr(param, "table_ref", None), db)
+                or safe_resolve(getattr(param, "table_key_ref", None), db)
+            )
+            if not table:
+                continue
+
+            rows = (
+                getattr(table, "rows", None)
+                or getattr(table, "table_rows_raw", None)
+                or []
+            )
+            if not rows:
+                continue
+
+            # --------------------------------------------------
+            # Process Each TABLE ROW
+            # --------------------------------------------------
+            for row in rows:
+                key = getattr(row, "key", None) or getattr(row, "key_raw", None)
+                if key is None:
+                    continue
+
+                try:
+                    did_hex = f"0x{int(key):04X}"
+                except Exception:
+                    did_hex = str(key)
+
+                flatten_nodes = []
+                GROUP_INDEX.clear()
+
+                # =====================================================
+                #   PRIORITY-1 STRUCTURE DOP (Row holds datatype)
+                # =====================================================
+                dop = safe_resolve(getattr(row, "datatype", None), db)
+                if dop and getattr(dop, "structure", None):
+                    try:
+                        for sub in dop.structure.parameters:
+                            flatten_nodes.extend(
+                                flatten_parameter(sub, db, "", svc_name)
+                            )
+                    except Exception:
+                        pass
+
+                # =====================================================
+                #   PRIORITY-2 EXPLICIT ROW PARAMETERS
+                # =====================================================
+                if hasattr(row, "parameters") and row.parameters:
+                    try:
+                        for sub in row.parameters:
+                            flatten_nodes.extend(
+                                flatten_parameter(sub, db, "", svc_name)
+                            )
+                    except Exception:
+                        pass
+
+                # =====================================================
+                # If Still Empty → Treat as Scalar Value Row
+                # =====================================================
+                if not flatten_nodes:
+                    flatten_nodes.append({
+                        "FullPath": f"{svc_name}.{table.short_name}.{row.short_name}",
+                        "serviceMeta": {
+                            "parameterIndexInsideStructure": 0
+                        },
+                        "responseMapping": {
+                            "specificParaName": getattr(row, "short_name", "VALUE"),
+                            "ParaType": "",
+                        },
+                        "bitLength": 8
+                    })
+
+                final_params = self._build_final_parameters(flatten_nodes)
+
+                # --------------------------------------------------
+                # Build Final BLOCK
+                # --------------------------------------------------
+                results.append({
+                    "service": svc_name,
+                    "sid": sid,
+                    "did": did_hex,
+                    "direction": "READ",
+                    "semantic": get_semantic(svc),
+                    "description": getattr(row, "long_name", "") or getattr(row, "short_name", ""),
+
+                    "security": {
+                        "requiresUnlock": False,
+                        "level": None
+                    },
+
+                    "runtime": self._build_runtime_block(
+                        sid,
+                        did_hex,
+                        final_params
+                    ),
+
+                    "selection": {
+                        "type": "tableRow",
+                        "table": {
+                            "name": getattr(table, "short_name", ""),
+                            "rowFullXPath":
+                                f"{ecu.short_name}/"
+                                f"{svc.short_name}/"
+                                f"{getattr(table,'short_name','')}/"
+                                f"{getattr(row,'short_name','')}"
+                        }
+                    },
+
+                    "finalParameters": final_params
+                })
+
+    return results
+
+
 def _build_runtime_block(self, sid, did_hex, final_parameters):
     """
     Builds realistic diagnostic runtime simulation output.
