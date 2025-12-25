@@ -15,10 +15,32 @@ from odx_utils import (
 # Helpers
 # =========================================================
 def hex_to_bytes(hex_str):
+    """
+    Safely convert 'AA BB CC' or '0xAA 0xBB' into bytes.
+    Ignores invalid or empty tokens instead of crashing.
+    """
     if not hex_str:
         return b""
-    parts = hex_str.strip().split()
-    return bytes(int(x, 16) for x in parts)
+
+    parts = hex_str.strip().replace("\n", " ").split()
+    out = []
+
+    for x in parts:
+        if not x:
+            continue
+
+        # allow 0x prefix
+        if x.lower().startswith("0x"):
+            x = x[2:]
+
+        # must be valid hex
+        try:
+            out.append(int(x, 16))
+        except Exception:
+            # Instead of crashing, record as zero
+            out.append(0)
+
+    return bytes(out)
 
 
 def decode_payload(payload_bytes, final_params):
