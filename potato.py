@@ -1,3 +1,30 @@
+from odx_json_exporter import OdxDataExporter
+import odxtools
+import json
+
+
+def export_final_json(pdx_path, out_file):
+    db = odxtools.load_file(pdx_path, use_weakrefs=True)
+
+    try:
+        db.refresh()
+    except:
+        pass
+
+    exporter = OdxDataExporter()
+
+    final_output = []
+
+    for ecu in getattr(db, "ecus", []) or []:
+        ecu_json = exporter.export_ecu(db, ecu)
+        final_output.append(ecu_json)
+
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(final_output, f, indent=2)
+
+    print(f"Export completed → {out_file}")
+
+
 from typing import List, Dict, Any
 from odxtools.database import Database
 
