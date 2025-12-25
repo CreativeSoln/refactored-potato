@@ -1,3 +1,97 @@
+def _build_runtime_block(self, sid, did_hex, final_parameters):
+    """
+    Build deterministic and realistic UDS runtime simulation data.
+    - Request frame:  SID + DID
+    - Response frame: POSITIVE SID + DID + payload
+    - Payload bytes: generated based on parameter bit length
+    - Decoded values: numeric where applicable
+    """
+
+    # -----------------------------
+    # Resolve SID and POS SID
+    # -----------------------------
+    try:
+        sid_int = int(sid.replace("0x", ""), 16)
+    except Exception:
+        sid_int = 0x22
+
+    pos_sid = f"{sid_int + 0x40:02X}"
+
+    # -----------------------------
+    # DID Formatting
+    # -----------------------------
+    did_clean = did_hex.replace("0x", "").upper()
+    if len(did_clean) < 4:
+        did_clean = did_clean.rjust(4, "0")
+
+    did_hi = did_clean[:2]
+    did_lo = did_clean[2:]
+
+    sample_request = f"{sid_int:02X} {did_hi} {did_lo}"
+
+    # -----------------------------
+    # Compute Payload Length
+    # -----------------------------
+    total_bits = sum(int(p.get("bitlength", 0) or 0) for p in final_parameters)
+    if total_bits <= 0:
+        total_bits = 16
+
+    byte_len = max(1, total_bits // 8)
+
+    # -----------------------------
+    # Generate Realistic Payload
+    # -----------------------------
+    payload_bytes = []
+    value_seed = int(did_clean, 16) % 255 or 1
+
+    for i in range(byte_len):
+        payload_bytes.append((value_seed + i) & 0xFF)
+
+    payload_hex = " ".join(f"{b:02X}" for b in payload_bytes)
+
+    sample_response = f"{pos_sid} {did_hi} {did_lo} {payload_hex}".strip()
+
+    # -----------------------------
+    # Build Decoded Sample
+    # -----------------------------
+    decoded = {}
+    curr_val = 1
+
+    for p in final_parameters:
+        name = p.get("name") or p.get("arrayName") or "Value"
+
+        try:
+            bitlen = int(p.get("bitlength", 0) or 0)
+        except:
+            bitlen = 16
+
+        scale = 1.0
+        unit = ""
+
+        if p.get("scaling"):
+            scale = float(p["scaling"].get("factor", 1) or 1)
+            unit = p["scaling"].get("unit", "") or ""
+
+        value = (curr_val * scale)
+
+        if unit:
+            decoded[name] = float(value)
+        else:
+            decoded[name] = int(value)
+
+        curr_val += 1
+
+    # -----------------------------
+    # Runtime Block Output
+    # -----------------------------
+    return {
+        "supportsSimulation": True,
+        "sampleRequestHex": sample_request,
+        "sampleResponseHex": sample_response,
+        "decodedSample": decoded
+    }
+
+
 def export_ecu(self, db, ecu):
     ecu_json = {
         "meta": {
