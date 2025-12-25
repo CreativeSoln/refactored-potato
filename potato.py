@@ -1,3 +1,42 @@
+# -----------------------------------------------
+# Build Request / Response Header
+# -----------------------------------------------
+try:
+    sid_int = int(sid, 16)
+    pos_sid = f"{sid_int + 0x40:02X}"
+except:
+    sid_int = 0x22
+    pos_sid = "62"
+
+did_clean = did_hex.replace("0x", "").upper()
+did_hi = did_clean[:2]
+did_lo = did_clean[2:]
+
+# ------------------------------------------------
+# Compute payload byte length
+# ------------------------------------------------
+payload_len = max(1, int(sum(p.get("bitlength", 0) or 0 for p in final_parameters) / 8))
+
+# Deterministic payload (01 02 03 …)
+payload_bytes = " ".join([f"{(i+1):02X}" for i in range(payload_len)])
+
+# ------------------------------------------------
+# READ vs WRITE request formatting
+# ------------------------------------------------
+if sid == "0x2E":
+    # WRITE: SID + DID + DATA
+    sample_request = f"2E {did_hi} {did_lo} {payload_bytes}".strip()
+else:
+    # READ: SID + DID
+    sample_request = f"{sid.replace('0x','').upper()} {did_hi} {did_lo}".strip()
+
+# ------------------------------------------------
+# Positive Response Always = SID+0x40 + DID
+# ------------------------------------------------
+sample_response = f"{pos_sid} {did_hi} {did_lo} {payload_bytes if sid=='0x2E' else ''}".strip()
+
+
+
 def _build_runtime_block(self, sid, did_hex, final_parameters):
     """
     Build deterministic and realistic UDS runtime simulation data.
