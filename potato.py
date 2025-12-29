@@ -1,3 +1,47 @@
+// =======================================================
+// STRUCTURE PARAM CHILD HANDLING (WORKING)
+// =======================================================
+let childParams = [];
+
+// 1️⃣ Case-1: Children directly under PARAM
+childParams = getElements(paramEl, "PARAM");
+
+// 2️⃣ Case-2: Children inside STRUCTURE tag
+if ((!childParams || childParams.length === 0)) {
+  const struct = paramEl.getElementsByTagName("STRUCTURE")[0];
+  if (struct) {
+    childParams = getElements(struct, "PARAM");
+  }
+}
+
+// 3️⃣ Case-3: Some OEMs use "STRUCT"
+if ((!childParams || childParams.length === 0)) {
+  const structAlt = paramEl.getElementsByTagName("STRUCT")[0];
+  if (structAlt) {
+    childParams = getElements(structAlt, "PARAM");
+  }
+}
+
+// 4️⃣ Case-4: Daimler ODX uses LIST
+if ((!childParams || childParams.length === 0)) {
+  const list = paramEl.getElementsByTagName("LIST")[0];
+  if (list) {
+    childParams = getElements(list, "PARAM");
+  }
+}
+
+// 5️⃣ Finally parse if found
+if (childParams && childParams.length > 0) {
+  console.log("FOUND CHILDREN →", shortName, childParams.length);
+  param.children = childParams.map(p =>
+    parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
+  );
+} else {
+  console.log("NO CHILDREN FOUND FOR", shortName);
+}
+
+
+
 // Find children of structure param
 let childContainer = paramEl;
 
