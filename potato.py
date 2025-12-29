@@ -1,3 +1,16 @@
+const structure = dopEl.getElementsByTagName("STRUCTURE")[0];
+let structureParams = [];
+
+if (structure) {
+  structureParams = getElements(structure, "PARAM");
+}
+
+return {
+   ...
+   structureParams,
+};
+
+
 // =======================================================
 // STRUCTURE PARAM CHILD HANDLING (WORKING)
 // =======================================================
