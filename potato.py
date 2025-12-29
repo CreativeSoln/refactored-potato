@@ -1,3 +1,44 @@
+const dopMap = new Map();
+dataObjectProps.forEach(dop => {
+  dopMap.set(dop.id, dop);
+});
+
+
+
+// --- STRUCTURE from DOP-REF ---
+const dopRefEl = paramEl.getElementsByTagName("DOP-REF")[0];
+const dopRefId = dopRefEl ? getAttr(dopRefEl, "ID-REF") : "";
+
+if (dopRefId) {
+  const dop = dopMap.get(dopRefId);
+
+  console.log("PARAM:", shortName, "DOP:", dopRefId, "FOUND?", !!dop);
+
+  if (dop && dop.structureParams) {
+    param.children = dop.structureParams.map(p =>
+      parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
+    );
+
+    console.log("STRUCTURE CHILDREN:", shortName, param.children.length);
+  }
+}
+
+const structure = dopEl.getElementsByTagName("STRUCTURE")[0];
+
+let structureParams = [];
+if (structure) {
+  structureParams = getElements(structure, "PARAM");
+}
+
+return {
+   ...
+   structureParams,
+};
+
+///////////////////////////
+
+
+
 // STRUCTURE via DOP-REF
 if (attrs["DOP-REF"]) {
   const dop = dopMap.get(attrs["DOP-REF"]);
