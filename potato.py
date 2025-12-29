@@ -1,3 +1,10 @@
+  const childParams = getElements(paramEl, "PARAM");
+   if (childParams && childParams.length > 0) {
+     param.children = childParams.map(p =>
+       parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
+     );
+   }
+
 # ------------------------------------------------
 # WRITE DID Response Rule (ISO 14229)
 # ------------------------------------------------
