@@ -1,4 +1,20 @@
-  const childParams = getElements(paramEl, "PARAM");
+// Find children of structure param
+let childContainer = paramEl;
+
+// if STRUCTURE wrapper exists, use it
+const structEl = paramEl.getElementsByTagName("STRUCTURE")[0];
+if (structEl) childContainer = structEl;
+
+const childParams = getElements(childContainer, "PARAM");
+
+if (childParams && childParams.length > 0) {
+  param.children = childParams.map(p =>
+    parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
+  );
+}
+
+
+const childParams = getElements(paramEl, "PARAM");
    if (childParams && childParams.length > 0) {
      param.children = childParams.map(p =>
        parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
