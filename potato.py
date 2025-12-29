@@ -1,3 +1,17 @@
+// STRUCTURE via DOP-REF
+if (attrs["DOP-REF"]) {
+  const dop = dopMap.get(attrs["DOP-REF"]);
+  if (dop && dop.structureParams) {
+    param.children = dop.structureParams.map(p =>
+      parseParam(p, "STRUCTURE", shortName, layerName, serviceShortName)
+    );
+    console.log("STRUCTURE FROM DOP →", shortName, param.children.length);
+  } else {
+    console.log("DOP FOUND BUT NO PARAMS", shortName, attrs["DOP-REF"]);
+  }
+}
+
+
 const structure = dopEl.getElementsByTagName("STRUCTURE")[0];
 let structureParams = [];
 
