@@ -1,3 +1,18 @@
+
+h.getElementsNS(doc, 'STRUCTURE').forEach(s => {
+   const id = h.getAttr(s, 'ID') || h.getAttr(s, 'id');
+   if (id) idIndex.set(id, s);
+});
+
+
+h.getElementsNS(doc, 'ECU-SHARED-DATA')
+ .forEach(sd => h.getElementsNS(sd, 'STRUCTURE')
+ .forEach(s => idIndex.set(h.getAttr(s,'ID'), s)));
+
+const refId = h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref');
+const structureNode = idIndex.get(refId);
+
+
 if (structureEl) {
 
     const paramsNode = h.getFirstNS(structureEl, 'PARAMS');
