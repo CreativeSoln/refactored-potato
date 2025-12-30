@@ -6,6 +6,12 @@ console.log("Has protocols:", database?.protocols?.length);
 console.log("Has functionalGroups:", database?.functionalGroups?.length);
 console.log("Has ecuSharedData:", database?.ecuSharedData?.length);
 
+console.log(
+  "Example ECU Variant params:",
+  database?.ecuVariants?.[0]?.services?.[0]?.request?.params
+);
+
+
 
 // ---------------------------------------------------------------------------
 // Auto Download JSON (Browser / Vite / Electron Renderer Safe)
