@@ -1,0 +1,167 @@
+import { useState, useCallback } from 'react';
+import * as XLSX from 'xlsx';
+
+export const useExport = (database, selectedParams) => {
+  const [exportStatus, setExportStatus] = useState(null);
+  const [showJsonMenu, setShowJsonMenu] = useState(false);
+  const [showExcelMenu, setShowExcelMenu] = useState(false);
+
+  const getParamsForExport = useCallback((exportSelected) => {
+    if (!database) return [];
+    return exportSelected
+      ? database.allParams.filter(p => selectedParams.has(p.id))
+      : database.allParams;
+  }, [database, selectedParams]);
+
+
+  // =========================================================================
+  // AUTO JSON EXPORT (ONE FILE ONLY)
+  // =========================================================================
+  const autoExportJSON = useCallback(() => {
+    if (!database || !database.allParams || database.allParams.length === 0) {
+      console.warn('Auto Export Skipped: No database or parameters available');
+      return;
+    }
+
+    try {
+      const exportData = {
+        metadata: {
+          exportedAt: new Date().toISOString(),
+          totalParameters: database.allParams.length,
+          ecuVariants: database.ecuVariants?.length || 0,
+          baseVariants: database.baseVariants?.length || 0,
+          protocols: database.protocols?.length || 0,
+          functionalGroups: database.functionalGroups?.length || 0,
+          ecuSharedData: database.ecuSharedData?.length || 0
+        },
+
+        parameters: database.allParams,
+        units: database.allUnits,
+        compuMethods: database.allCompuMethods,
+        dataObjects: database.allDataObjects,
+        dtcs: database.allDTCs
+      };
+
+      const blob = new Blob(
+        [JSON.stringify(exportData, null, 2)],
+        { type: 'application/json' }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+
+      a.href = url;
+      a.download = `ODX_Combined_${new Date().toISOString().slice(0, 10)}.json`;
+
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      console.log(`Auto Export Complete → ${database.allParams.length} parameters exported`);
+    } catch (err) {
+      console.error('Auto JSON Export Failed', err);
+    }
+
+  }, [database]);
+
+
+  // =========================================================================
+  // MANUAL JSON EXPORT (Still available if needed in UI)
+  // =========================================================================
+  const exportToJSON = useCallback((exportSelected = false) => {
+    const params = getParamsForExport(exportSelected);
+
+    if (params.length === 0) {
+      setExportStatus('No parameters to export');
+      setTimeout(() => setExportStatus(null), 2000);
+      return;
+    }
+
+    setExportStatus(`Exporting ${params.length} parameters to JSON...`);
+    setShowJsonMenu(false);
+
+    try {
+      const exportData = {
+        metadata: {
+          exportDate: new Date().toISOString(),
+          exportType: exportSelected ? 'selected' : 'all',
+          totalParameters: params.length
+        },
+        parameters: params,
+        units: database.allUnits,
+        compuMethods: database.allCompuMethods,
+        dataObjects: database.allDataObjects,
+        dtcs: database.allDTCs,
+      };
+
+      const blob = new Blob(
+        [JSON.stringify(exportData, null, 2)],
+        { type: 'application/json' }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+
+      a.href = url;
+      a.download = `odx_params_${exportSelected ? 'selected' : 'all'}_${new Date().toISOString().slice(0, 10)}.json`;
+
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExportStatus(`Exported ${params.length} parameters to JSON`);
+      setTimeout(() => setExportStatus(null), 3000);
+    } catch (err) {
+      setExportStatus(`Error: ${err.message}`);
+      setTimeout(() => setExportStatus(null), 3000);
+    }
+
+  }, [database, getParamsForExport]);
+
+
+  // =========================================================================
+  // EXCEL EXPORT (unchanged, still available)
+  // =========================================================================
+  const exportToExcel = useCallback((exportSelected = false) => {
+    const params = getParamsForExport(exportSelected);
+
+    if (params.length === 0) {
+      setExportStatus('No parameters to export');
+      setTimeout(() => setExportStatus(null), 2000);
+      return;
+    }
+
+    try {
+      const worksheet = XLSX.utils.json_to_sheet(params);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Parameters');
+
+      XLSX.writeFile(
+        workbook,
+        `odx_params_${exportSelected ? 'selected' : 'all'}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+
+      setExportStatus(`Exported ${params.length} parameters to Excel`);
+      setTimeout(() => setExportStatus(null), 3000);
+    } catch (err) {
+      setExportStatus(`Excel Export Failed: ${err.message}`);
+      setTimeout(() => setExportStatus(null), 3000);
+    }
+
+  }, [database, getParamsForExport]);
+
+
+  return {
+    exportStatus,
+    showJsonMenu,
+    showExcelMenu,
+    setShowJsonMenu,
+    setShowExcelMenu,
+
+    autoExportJSON,
+    exportToJSON,
+    exportToExcel
+  };
+};
