@@ -13,6 +13,92 @@ export const useExport = (database, selectedParams) => {
       : database.allParams;
   }, [database, selectedParams]);
 
+const buildDiagnosticJson = (database) => {
+  return {
+    meta: {
+      formatVersion: "1.2",
+      toolName: "DiagnosticUI",
+      createdDate: new Date().toLocaleString()
+    },
+
+    ecuInfo: {
+      ecuName: database?.ecuVariants?.[0]?.shortName || "UnknownECU",
+      variant: database?.ecuVariants?.[0]?.longName || "",
+      description: "Combined JSON with both tableRow and structureLeaf entries"
+    },
+
+    read_did_groups: (database?.allParams || [])
+      .filter(p => p.semantic === "DATA")
+      .map(p => ({
+        service: {
+          service: "ReadDataByIdentifier",
+          sid: "0x22",
+          did: p.shortName,
+          direction: "READ",
+          semantic: p.semantic,
+          description: p.longName || "",
+          security: {
+            requiresUnlock: false,
+            level: null
+          }
+        },
+
+        runtime: {
+          supportsSimulation: true,
+          sampleRequestHex: `22 ${p.shortName?.replace("0x","")}`,
+          sampleResponseHex: "",
+          decodedSample: {}
+        },
+
+        selection: {
+          type: p.children?.length ? "tableRow" : "structureLeaf",
+          table: p.children?.length ? {
+            name: p.shortName,
+            rowFullXPath: p.path || ""
+          } : undefined
+        },
+
+        finalParameters: [
+          {
+            name: p.shortName,
+            path: p.path || "",
+            arrayIndex: 0,
+            bitLength: Number(p.bitLength || 0),
+            dataType: p.baseDataType || ""
+          }
+        ]
+      }))
+  };
+};
+
+const exportDiagnosticJSON = useCallback(() => {
+  if (!database) {
+    console.warn("No DB loaded");
+    return;
+  }
+
+  const json = buildDiagnosticJson(database);
+
+  const blob = new Blob(
+    [JSON.stringify(json, null, 2)],
+    { type: "application/json" }
+  );
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = `diagnostic_ecu_export_${new Date().toISOString().slice(0,10)}.json`;
+
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  console.log("Diagnostic JSON Export Completed");
+}, [database]);
+
+
 
   // =========================================================================
   // AUTO JSON EXPORT (ONE FILE ONLY)
