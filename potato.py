@@ -1,10 +1,18 @@
+setDatabase(mergedDatabase);
+
 console.log("=== DATABASE STRUCTURE CHECK ===");
-console.log("Has allParams:", !!database?.allParams, "Count:", database?.allParams?.length);
-console.log("Has ecuVariants:", database?.ecuVariants?.length);
-console.log("Has baseVariants:", database?.baseVariants?.length);
-console.log("Has protocols:", database?.protocols?.length);
-console.log("Has functionalGroups:", database?.functionalGroups?.length);
-console.log("Has ecuSharedData:", database?.ecuSharedData?.length);
+console.log("Merged database keys:", Object.keys(mergedDatabase));
+
+console.log("Has allParams:", !!mergedDatabase?.allParams, "Count:", mergedDatabase?.allParams?.length);
+console.log("Has ecuVariants:", mergedDatabase?.ecuVariants?.length);
+console.log("Has baseVariants:", mergedDatabase?.baseVariants?.length);
+console.log("Has protocols:", mergedDatabase?.protocols?.length);
+console.log("Has functionalGroups:", mergedDatabase?.functionalGroups?.length);
+console.log("Has ecuSharedData:", mergedDatabase?.ecuSharedData?.length);
+
+// Inspect one param
+console.log("Sample Param:", mergedDatabase?.allParams?.[0]);
+
 
 console.log(
   "Example ECU Variant params:",
