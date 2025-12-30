@@ -2,15 +2,30 @@
 // src/parsers/odxParsers.js
 //
 
-export const buildStableParamId = ({ layerId, serviceId, messageKind, parentName, paramIndex, paramShortName }) => (
-  [layerId || 'layer', serviceId || 'service', messageKind || 'MSG', parentName || 'parent', String(paramIndex ?? 0), paramShortName || 'param'].join('::')
+// ============================================================================
+// UTIL
+// ============================================================================
+export const buildStableParamId = ({
+  layerId,
+  serviceId,
+  messageKind,
+  parentName,
+  paramIndex,
+  paramShortName
+}) => (
+  [layerId || 'layer', serviceId || 'service', messageKind || 'MSG',
+    parentName || 'parent', String(paramIndex ?? 0), paramShortName || 'param'
+  ].join('::')
 );
+
 
 // ============================================================================
 // UNIT
 // ============================================================================
 export const parseUnit = (unitEl, h) => {
-  const dimRefEl = h.getFirstNS(unitEl, 'UNIT-PHYSICAL-DIMENSION-REF') || h.getFirstNS(unitEl, 'PHYSICAL-DIMENSION-REF');
+  const dimRefEl =
+    h.getFirstNS(unitEl, 'UNIT-PHYSICAL-DIMENSION-REF')
+    || h.getFirstNS(unitEl, 'PHYSICAL-DIMENSION-REF');
 
   return {
     id: h.getAttr(unitEl, 'ID') || h.getAttr(unitEl, 'id'),
@@ -19,9 +34,12 @@ export const parseUnit = (unitEl, h) => {
     displayName: h.getText(unitEl, 'DISPLAY-NAME'),
     factorSiToUnit: h.getText(unitEl, 'FACTOR-SI-TO-UNIT'),
     offsetSiToUnit: h.getText(unitEl, 'OFFSET-SI-TO-UNIT'),
-    physicalDimensionRefId: dimRefEl ? (h.getAttr(dimRefEl, 'ID-REF') || h.getAttr(dimRefEl, 'id-ref')) : '',
+    physicalDimensionRefId: dimRefEl
+      ? h.getAttr(dimRefEl, 'ID-REF') || h.getAttr(dimRefEl, 'id-ref')
+      : '',
   };
 };
+
 
 // ============================================================================
 // COMPU-METHOD
@@ -34,8 +52,13 @@ export const parseCompuMethod = (compuEl, h) => {
       const compuConst = h.getFirstNS(scale, 'COMPU-CONST');
       const compuRat = h.getFirstNS(scale, 'COMPU-RATIONAL-COEFFS');
 
-      const nums = compuRat ? h.getElementsNS(compuRat, 'NUM').map(n => n.textContent) : [];
-      const dens = compuRat ? h.getElementsNS(compuRat, 'DEN').map(d => d.textContent) : [];
+      const nums = compuRat
+        ? h.getElementsNS(compuRat, 'NUM').map(n => n.textContent)
+        : [];
+
+      const dens = compuRat
+        ? h.getElementsNS(compuRat, 'DEN').map(d => d.textContent)
+        : [];
 
       return {
         lowerLimit: h.getText(scale, 'LOWER-LIMIT'),
@@ -53,9 +76,10 @@ export const parseCompuMethod = (compuEl, h) => {
     shortName: h.getText(compuEl, 'SHORT-NAME'),
     longName: h.getText(compuEl, 'LONG-NAME'),
     category: h.getText(compuEl, 'CATEGORY'),
-    scales,
+    scales
   };
 };
+
 
 // ============================================================================
 // DATA OBJECT PROP
@@ -71,13 +95,24 @@ export const parseDataObjectProp = (dopEl, h) => {
     longName: h.getText(dopEl, 'LONG-NAME'),
     description: h.getText(dopEl, 'DESC'),
 
-    baseDataType: diagCodedType ? (h.getAttr(diagCodedType, 'BASE-DATA-TYPE') || h.getAttr(diagCodedType, 'base-data-type')) : '',
-    bitLength: diagCodedType ? h.getText(diagCodedType, 'BIT-LENGTH') : '',
-    physicalBaseDataType: physType ? h.getAttr(physType, 'BASE-DATA-TYPE') || h.getAttr(physType, 'base-data-type') : '',
+    baseDataType: diagCodedType
+      ? (h.getAttr(diagCodedType, 'BASE-DATA-TYPE')
+        || h.getAttr(diagCodedType, 'base-data-type'))
+      : '',
 
-    unitRefId: unitRef ? (h.getAttr(unitRef, 'ID-REF') || h.getAttr(unitRef, 'id-ref')) : '',
+    bitLength: diagCodedType ? h.getText(diagCodedType, 'BIT-LENGTH') : '',
+
+    physicalBaseDataType: physType
+      ? (h.getAttr(physType, 'BASE-DATA-TYPE')
+        || h.getAttr(physType, 'base-data-type'))
+      : '',
+
+    unitRefId: unitRef
+      ? (h.getAttr(unitRef, 'ID-REF') || h.getAttr(unitRef, 'id-ref'))
+      : '',
   };
 };
+
 
 // ============================================================================
 // DTC
@@ -92,13 +127,23 @@ export const parseDTC = (dtcEl, h) => ({
   level: h.getText(dtcEl, 'LEVEL'),
 });
 
+
 // ============================================================================
-// PARAM  (FINAL STRUCTURE SUPPORT - CORRECTED ODX LOGIC)
+// PARAM — FULL STRUCTURE SUPPORT
 // ============================================================================
 export const parseParam = (paramEl, ctx, idIndex, h) => {
-  const { layerId, layerShortName, serviceId, serviceShortName, messageKind, parentName, paramIndex } = ctx;
+  const {
+    layerId,
+    layerShortName,
+    serviceId,
+    serviceShortName,
+    messageKind,
+    parentName,
+    paramIndex
+  } = ctx;
 
   const attrs = h.getAllAttrs(paramEl);
+
   const codedConst = h.getFirstNS(paramEl, 'CODED-CONST');
   const physConst = h.getFirstNS(paramEl, 'PHYS-CONST');
   const dopRefEl = h.getFirstNS(paramEl, 'DOP-REF');
@@ -106,6 +151,7 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
   const compuRef = h.getFirstNS(paramEl, 'COMPU-METHOD-REF');
   const diagCodedType = h.getFirstNS(paramEl, 'DIAG-CODED-TYPE');
   const physType = h.getFirstNS(paramEl, 'PHYSICAL-TYPE');
+
   const shortName = h.getText(paramEl, 'SHORT-NAME');
 
   const id = buildStableParamId({
@@ -117,71 +163,52 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
     paramShortName: shortName
   });
 
-  // ======================================================================
-  // TRUE STRUCTURE RESOLUTION (ODX REALITY)
-  // ======================================================================
+  // ---------------------------------------
+  // STRUCTURE RESOLUTION
+  // ---------------------------------------
   let structureEl = null;
-  let structureChildren = [];
-  let dopNode = null;
 
-  // --- Resolve DOP via ID ---
+  // Via DOP-REF
   if (dopRefEl) {
     const refId = h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref');
-    if (refId) dopNode = idIndex.get(refId);
+    if (refId) structureEl = idIndex.get(refId);
   }
 
-  // --- Resolve DOP via Short Name fallback ---
-  if (!dopNode && dopSnRef) {
+  // Via SHORT-NAME reference fallback
+  if (!structureEl && dopSnRef) {
     const sn = h.getText(dopSnRef, 'SHORT-NAME');
     for (const el of idIndex.values()) {
       if (h.getText(el, 'SHORT-NAME') === sn) {
-        dopNode = el;
+        structureEl = el;
         break;
       }
     }
   }
 
-  // --- Locate STRUCTURE node ---
-  if (dopNode) {
-    structureEl = h.getFirstNS(dopNode, 'STRUCTURE');
-
-    if (!structureEl) {
-      const structRef = h.getFirstNS(dopNode, 'STRUCTURE-REF');
-      if (structRef) {
-        const sid = h.getAttr(structRef, 'ID-REF') || h.getAttr(structRef, 'id-ref');
-        if (sid) structureEl = idIndex.get(sid);
-      }
-    }
-  }
-
-  // --- Extract STRUCTURE → PARAMS → PARAM ---
+  // Parse nested children
+  let structureChildren = [];
   if (structureEl) {
-    const paramsNode = h.getFirstNS(structureEl, 'PARAMS');
-    if (paramsNode) {
-      const structParams = h.getElementsNS(paramsNode, 'PARAM');
+    const structParams = h.getElementsNS(structureEl, 'PARAM');
 
-      structureChildren = structParams.map((childEl, idx) =>
-        parseParam(
-          childEl,
-          {
-            layerId,
-            layerShortName,
-            serviceId,
-            serviceShortName,
-            messageKind: 'STRUCTURE',
-            parentName: shortName,
-            paramIndex: idx
-          },
-          idIndex,
-          h
-        )
-      );
-    }
+    structureChildren = structParams.map((childEl, idx) =>
+      parseParam(
+        childEl,
+        {
+          layerId,
+          layerShortName,
+          serviceId,
+          serviceShortName,
+          messageKind: 'STRUCTURE',
+          parentName: shortName,
+          paramIndex: idx
+        },
+        idIndex,
+        h
+      )
+    );
   }
 
-  // ======================================================================
-
-  const p = {
+  return {
     id,
     shortName,
     longName: h.getText(paramEl, 'LONG-NAME'),
@@ -194,18 +221,40 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
     minLength: diagCodedType ? h.getText(diagCodedType, 'MIN-LENGTH') : '',
     maxLength: diagCodedType ? h.getText(diagCodedType, 'MAX-LENGTH') : '',
 
-    baseDataType: diagCodedType ? (h.getAttr(diagCodedType, 'BASE-DATA-TYPE') || h.getAttr(diagCodedType, 'base-data-type')) : '',
-    physicalBaseType: physType ? (h.getAttr(physType, 'BASE-DATA-TYPE') || h.getAttr(physType, 'base-data-type')) : '',
+    baseDataType: diagCodedType
+      ? (h.getAttr(diagCodedType, 'BASE-DATA-TYPE')
+        || h.getAttr(diagCodedType, 'base-data-type'))
+      : '',
 
-    isHighLowByteOrder: diagCodedType ? h.getAttr(diagCodedType, 'IS-HIGHLOW-BYTE-ORDER') || h.getAttr(diagCodedType, 'is-highlow-byte-order') : '',
+    physicalBaseType: physType
+      ? (h.getAttr(physType, 'BASE-DATA-TYPE')
+        || h.getAttr(physType, 'base-data-type'))
+      : '',
 
-    codedConstValue: codedConst ? (h.getText(codedConst, 'CODED-VALUE') || h.getAttr(codedConst, 'CODED-VALUE')) : '',
+    isHighLowByteOrder: diagCodedType
+      ? (h.getAttr(diagCodedType, 'IS-HIGHLOW-BYTE-ORDER')
+        || h.getAttr(diagCodedType, 'is-highlow-byte-order'))
+      : '',
+
+    codedConstValue: codedConst
+      ? (h.getText(codedConst, 'CODED-VALUE')
+        || h.getAttr(codedConst, 'CODED-VALUE'))
+      : '',
+
     physConstValue: physConst ? h.getText(physConst, 'V') : '',
 
-    dopRefId: dopRefEl ? (h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref')) : '',
-    dopSnRefName: dopSnRef ? h.getAttr(dopSnRef, 'SHORT-NAME') || h.getAttr(dopSnRef, 'short-name') : '',
+    dopRefId: dopRefEl
+      ? (h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref'))
+      : '',
 
-    compuMethodRefId: compuRef ? (h.getAttr(compuRef, 'ID-REF') || h.getAttr(compuRef, 'id-ref')) : '',
+    dopSnRefName: dopSnRef
+      ? (h.getAttr(dopSnRef, 'SHORT-NAME')
+        || h.getAttr(dopSnRef, 'short-name'))
+      : '',
+
+    compuMethodRefId: compuRef
+      ? (h.getAttr(compuRef, 'ID-REF') || h.getAttr(compuRef, 'id-ref'))
+      : '',
 
     parentType: messageKind,
     parentName,
@@ -216,30 +265,38 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
 
     ...attrs,
   };
-
-  return p;
 };
+
 
 // ============================================================================
 // DIAG LAYER
 // ============================================================================
 export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
+
   const attrs = h.getAllAttrs(layerEl);
   const layerShortName = h.getText(layerEl, 'SHORT-NAME');
   const layerLongName = h.getText(layerEl, 'LONG-NAME');
   const layerId = attrs['ID'] || attrs['id'] || '';
+
   const parentRefEl = h.getFirstNS(layerEl, 'PARENT-REF');
 
   const requestMap = new Map();
   const posMap = new Map();
   const negMap = new Map();
 
+  // REQUEST
   h.getElementsNS(layerEl, 'REQUEST').forEach(reqEl => {
     const id = h.getAttr(reqEl, 'ID') || h.getAttr(reqEl, 'id');
     const reqShortName = h.getText(reqEl, 'SHORT-NAME');
 
     const params = h.getElementsNS(reqEl, 'PARAM').map((pEl, idx) =>
-      parseParam(pEl, { layerId, layerShortName, serviceId: '', serviceShortName: '', messageKind: 'REQUEST', parentName: reqShortName, paramIndex: idx }, idIndex, h)
+      parseParam(pEl, {
+        layerId, layerShortName,
+        serviceId: '', serviceShortName: '',
+        messageKind: 'REQUEST',
+        parentName: reqShortName,
+        paramIndex: idx
+      }, idIndex, h)
     );
 
     requestMap.set(id, {
@@ -250,12 +307,20 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
+
+  // POS RESPONSE
   h.getElementsNS(layerEl, 'POS-RESPONSE').forEach(resEl => {
     const id = h.getAttr(resEl, 'ID') || h.getAttr(resEl, 'id');
     const resShortName = h.getText(resEl, 'SHORT-NAME');
 
     const params = h.getElementsNS(resEl, 'PARAM').map((pEl, idx) =>
-      parseParam(pEl, { layerId, layerShortName, serviceId: '', serviceShortName: '', messageKind: 'POS_RESPONSE', parentName: resShortName, paramIndex: idx }, idIndex, h)
+      parseParam(pEl, {
+        layerId, layerShortName,
+        serviceId: '', serviceShortName: '',
+        messageKind: 'POS_RESPONSE',
+        parentName: resShortName,
+        paramIndex: idx
+      }, idIndex, h)
     );
 
     posMap.set(id, {
@@ -266,12 +331,20 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
+
+  // NEG RESPONSE
   h.getElementsNS(layerEl, 'NEG-RESPONSE').forEach(resEl => {
     const id = h.getAttr(resEl, 'ID') || h.getAttr(resEl, 'id');
     const resShortName = h.getText(resEl, 'SHORT-NAME');
 
     const params = h.getElementsNS(resEl, 'PARAM').map((pEl, idx) =>
-      parseParam(pEl, { layerId, layerShortName, serviceId: '', serviceShortName: '', messageKind: 'NEG_RESPONSE', parentName: resShortName, paramIndex: idx }, idIndex, h)
+      parseParam(pEl, {
+        layerId, layerShortName,
+        serviceId: '', serviceShortName: '',
+        messageKind: 'NEG_RESPONSE',
+        parentName: resShortName,
+        paramIndex: idx
+      }, idIndex, h)
     );
 
     negMap.set(id, {
@@ -282,14 +355,25 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
+
+  // SERVICES
   const services = h.getElementsNS(layerEl, 'DIAG-SERVICE').map(svcEl => {
     const svcAttrs = h.getAllAttrs(svcEl);
     const svcShortName = h.getText(svcEl, 'SHORT-NAME');
     const svcId = svcAttrs['ID'] || svcAttrs['id'] || '';
 
-    const requestRefId = (h.getAttr(h.getFirstNS(svcEl, 'REQUEST-REF'), 'ID-REF') || h.getAttr(h.getFirstNS(svcEl, 'REQUEST-REF'), 'id-ref')) || '';
-    const posResponseRefIds = h.getElementsNS(svcEl, 'POS-RESPONSE-REF').map(r => h.getAttr(r, 'ID-REF') || h.getAttr(r, 'id-ref'));
-    const negResponseRefIds = h.getElementsNS(svcEl, 'NEG-RESPONSE-REF').map(r => h.getAttr(r, 'ID-REF') || h.getAttr(r, 'id-ref'));
+    const requestRefId =
+      (h.getAttr(h.getFirstNS(svcEl, 'REQUEST-REF'), 'ID-REF')
+        || h.getAttr(h.getFirstNS(svcEl, 'REQUEST-REF'), 'id-ref'))
+      || '';
+
+    const posResponseRefIds =
+      h.getElementsNS(svcEl, 'POS-RESPONSE-REF')
+        .map(r => h.getAttr(r, 'ID-REF') || h.getAttr(r, 'id-ref'));
+
+    const negResponseRefIds =
+      h.getElementsNS(svcEl, 'NEG-RESPONSE-REF')
+        .map(r => h.getAttr(r, 'ID-REF') || h.getAttr(r, 'id-ref'));
 
     const request = requestMap.get(requestRefId) || null;
     const posResponses = posResponseRefIds.map(id => posMap.get(id)).filter(Boolean);
@@ -308,9 +392,9 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
               parentName: msg.shortName,
               paramIndex: i,
               paramShortName: p.shortName,
-              serviceShortName: svcShortName,
-            }),
-          })),
+              serviceShortName: svcShortName
+            })
+          }))
         }
         : null;
 
@@ -321,34 +405,59 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
       description: h.getText(svcEl, 'DESC'),
       semantic: svcAttrs['SEMANTIC'] || svcAttrs['semantic'] || '',
       addressing: svcAttrs['ADDRESSING'] || svcAttrs['addressing'] || '',
+
       request: stampParams(request, 'REQUEST'),
       posResponses: posResponses.map(r => stampParams(r, 'POS_RESPONSE')).filter(Boolean),
       negResponses: negResponses.map(r => stampParams(r, 'NEG_RESPONSE')).filter(Boolean),
+
       ...svcAttrs,
     };
   });
 
+  // ======================================================================
+  // DATA DICTIONARY - local scope support
+  // ======================================================================
   const units = [];
-  const compuMethods = [];
   const dataObjectProps = [];
-  const dtcs = h.getElementsNS(layerEl, 'DTC').map(dtc => parseDTC(dtc, h));
+  const compuMethods = [];
+
+  const dtcs = h.getElementsNS(layerEl, 'DTC')
+    .map(d => parseDTC(d, h));
 
   const diagDataDict = h.getFirstNS(layerEl, 'DIAG-DATA-DICTIONARY-SPEC');
   if (diagDataDict) {
-    h.getElementsNS(diagDataDict, 'DATA-OBJECT-PROP').forEach(dop => dataObjectProps.push(parseDataObjectProp(dop, h)));
-    h.getElementsNS(diagDataDict, 'UNIT').forEach(u => units.push(parseUnit(u, h)));
+    h.getElementsNS(diagDataDict, 'DATA-OBJECT-PROP')
+      .forEach(d => dataObjectProps.push(parseDataObjectProp(d, h)));
+
+    h.getElementsNS(diagDataDict, 'UNIT')
+      .forEach(u => units.push(parseUnit(u, h)));
+
+    h.getElementsNS(diagDataDict, 'COMPU-METHOD')
+      .forEach(c => compuMethods.push(parseCompuMethod(c, h)));
   }
 
   const unitSpec = h.getFirstNS(layerEl, 'UNIT-SPEC');
-  if (unitSpec) h.getElementsNS(unitSpec, 'UNIT').forEach(u => units.push(parseUnit(u, h)));
+  if (unitSpec)
+    h.getElementsNS(unitSpec, 'UNIT')
+      .forEach(u => units.push(parseUnit(u, h)));
 
   return {
-    layerType: attrs['DIAG-LAYER-TYPE'] || attrs['TYPE'] || attrs['diag-layer-type'] || attrs['type'] || layerType,
+    layerType: attrs['DIAG-LAYER-TYPE']
+      || attrs['TYPE']
+      || attrs['diag-layer-type']
+      || attrs['type']
+      || layerType,
+
     id: layerId,
     shortName: layerShortName,
     longName: layerLongName,
     description: h.getText(layerEl, 'DESC'),
-    parentId: parentRefEl ? (h.getAttr(parentRefEl, 'ID-REF') || h.getAttr(parentRefEl, 'id-ref')) : '',
+
+    parentId: parentRefEl
+      ? (h.getAttr(parentRefEl, 'ID-REF')
+        || h.getAttr(parentRefEl, 'id-ref'))
+      : '',
+
     rxId: h.getText(layerEl, 'RECEIVE-ID'),
     txId: h.getText(layerEl, 'TRANSMIT-ID'),
 
@@ -362,30 +471,47 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
   };
 };
 
-// ============================================================================
-// DIAG-LAYER-CONTAINER (your screenshot style)
-// ============================================================================
-export const parseDiagLayerContainer = (doc, h, idIndex) => {
 
-  if (!idIndex) idIndex = new Map();
+// ============================================================================
+// LAYER CONTAINER — with FULL ID INDEXING
+// ============================================================================
+export const parseDiagLayerContainer = (doc, h, idIndex = new Map()) => {
 
-  const registerIds = (tag) => {
-    h.getElementsNS(doc, tag).forEach(el => {
+  // Register any referenced XML element into index
+  const registerTag = (root, tag) => {
+    h.getElementsNS(root, tag).forEach(el => {
       const id = h.getAttr(el, 'ID') || h.getAttr(el, 'id');
-      if (id) idIndex.set(id, el);
+      if (id && !idIndex.has(id)) idIndex.set(id, el);
     });
   };
 
-  registerIds('STRUCTURE');
-  registerIds('DATA-OBJECT-PROP');
-  registerIds('UNIT');
-  registerIds('COMPU-METHOD');
-  registerIds('REQUEST');
-  registerIds('POS-RESPONSE');
-  registerIds('NEG-RESPONSE');
-  registerIds('DIAG-SERVICE');
-  registerIds('DIAG-LAYER');
+  // Register inside DIAG-DATA-DICTIONARY (global + local)
+  const registerDiagDataDict = (root) => {
 
+    h.getElementsNS(root, 'DIAG-DATA-DICTIONARY-SPEC').forEach(dict => {
+      registerTag(dict, 'DATA-OBJECT-PROP');
+      registerTag(dict, 'STRUCTURE');
+      registerTag(dict, 'UNIT');
+      registerTag(dict, 'COMPU-METHOD');
+    });
+
+  };
+
+  // Global registrations
+  registerTag(doc, 'STRUCTURE');
+  registerTag(doc, 'DIAG-SERVICE');
+  registerTag(doc, 'REQUEST');
+  registerTag(doc, 'POS-RESPONSE');
+  registerTag(doc, 'NEG-RESPONSE');
+  registerTag(doc, 'DATA-OBJECT-PROP');
+  registerTag(doc, 'UNIT');
+  registerTag(doc, 'COMPU-METHOD');
+  registerTag(doc, 'DIAG-LAYER');
+
+  registerDiagDataDict(doc);
+  h.getElementsNS(doc, 'DIAG-LAYER').forEach(l => registerDiagDataDict(l));
+
+  // Container Output
   const container = {
     protocols: [],
     functionalGroups: [],
@@ -395,19 +521,29 @@ export const parseDiagLayerContainer = (doc, h, idIndex) => {
   };
 
   h.getElementsNS(doc, 'PROTOCOL')
-    .forEach(p => container.protocols.push(parseDiagLayer(p, 'PROTOCOL', idIndex, h)));
+    .forEach(p => container.protocols.push(
+      parseDiagLayer(p, 'PROTOCOL', idIndex, h)
+    ));
 
   h.getElementsNS(doc, 'FUNCTIONAL-GROUP')
-    .forEach(fg => container.functionalGroups.push(parseDiagLayer(fg, 'FUNCTIONAL-GROUP', idIndex, h)));
+    .forEach(fg => container.functionalGroups.push(
+      parseDiagLayer(fg, 'FUNCTIONAL-GROUP', idIndex, h)
+    ));
 
   h.getElementsNS(doc, 'BASE-VARIANT')
-    .forEach(bv => container.baseVariants.push(parseDiagLayer(bv, 'BASE-VARIANT', idIndex, h)));
+    .forEach(bv => container.baseVariants.push(
+      parseDiagLayer(bv, 'BASE-VARIANT', idIndex, h)
+    ));
 
   h.getElementsNS(doc, 'ECU-VARIANT')
-    .forEach(ev => container.ecuVariants.push(parseDiagLayer(ev, 'ECU-VARIANT', idIndex, h)));
+    .forEach(ev => container.ecuVariants.push(
+      parseDiagLayer(ev, 'ECU-VARIANT', idIndex, h)
+    ));
 
   h.getElementsNS(doc, 'ECU-SHARED-DATA')
-    .forEach(sd => container.ecuSharedData.push(parseDiagLayer(sd, 'ECU-SHARED-DATA', idIndex, h)));
+    .forEach(sd => container.ecuSharedData.push(
+      parseDiagLayer(sd, 'ECU-SHARED-DATA', idIndex, h)
+    ));
 
   return container;
 };
