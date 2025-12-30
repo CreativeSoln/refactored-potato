@@ -13,10 +13,43 @@ export const buildStableParamId = ({
   paramIndex,
   paramShortName
 }) => (
-  [layerId || 'layer', serviceId || 'service', messageKind || 'MSG',
-    parentName || 'parent', String(paramIndex ?? 0), paramShortName || 'param'
+  [
+    layerId || 'layer',
+    serviceId || 'service',
+    messageKind || 'MSG',
+    parentName || 'parent',
+    String(paramIndex ?? 0),
+    paramShortName || 'param'
   ].join('::')
 );
+
+
+// ============================================================================
+// DESC CLEANER
+// ============================================================================
+export const extractDescriptionText = (descEl) => {
+  if (!descEl) return '';
+
+  const walk = (node) => {
+    let text = '';
+
+    node.childNodes.forEach(child => {
+      if (child.nodeType === 3) {
+        text += child.textContent;
+      } else if (child.nodeName.toLowerCase() === 'br') {
+        text += '\n';
+      } else {
+        text += walk(child);
+      }
+    });
+
+    return text;
+  };
+
+  return walk(descEl)
+    .replace(/\n\s*\n+/g, '\n\n')
+    .trim();
+};
 
 
 // ============================================================================
@@ -129,7 +162,7 @@ export const parseDTC = (dtcEl, h) => ({
 
 
 // ============================================================================
-// PARAM — FULL STRUCTURE SUPPORT
+// PARAM — STRUCTURE SUPPORT
 // ============================================================================
 export const parseParam = (paramEl, ctx, idIndex, h) => {
   const {
@@ -151,7 +184,6 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
   const compuRef = h.getFirstNS(paramEl, 'COMPU-METHOD-REF');
   const diagCodedType = h.getFirstNS(paramEl, 'DIAG-CODED-TYPE');
   const physType = h.getFirstNS(paramEl, 'PHYSICAL-TYPE');
-
   const shortName = h.getText(paramEl, 'SHORT-NAME');
 
   const id = buildStableParamId({
@@ -163,18 +195,13 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
     paramShortName: shortName
   });
 
-  // ---------------------------------------
-  // STRUCTURE RESOLUTION
-  // ---------------------------------------
   let structureEl = null;
 
-  // Via DOP-REF
   if (dopRefEl) {
     const refId = h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref');
     if (refId) structureEl = idIndex.get(refId);
   }
 
-  // Via SHORT-NAME reference fallback
   if (!structureEl && dopSnRef) {
     const sn = h.getText(dopSnRef, 'SHORT-NAME');
     for (const el of idIndex.values()) {
@@ -185,8 +212,8 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
     }
   }
 
-  // Parse nested children
   let structureChildren = [];
+
   if (structureEl) {
     const structParams = h.getElementsNS(structureEl, 'PARAM');
 
@@ -269,6 +296,83 @@ export const parseParam = (paramEl, ctx, idIndex, h) => {
 
 
 // ============================================================================
+// TABLE-ROW
+// ============================================================================
+export const parseTableRow = (rowEl, h, idIndex) => {
+  const structureRef = h.getFirstNS(rowEl, 'STRUCTURE-REF');
+
+  let structure = null;
+
+  if (structureRef) {
+    const refId =
+      h.getAttr(structureRef, 'ID-REF')
+      || h.getAttr(structureRef, 'id-ref');
+
+    if (refId && idIndex.has(refId)) {
+      const structEl = idIndex.get(refId);
+
+      const params = h.getElementsNS(structEl, 'PARAM')
+        .map((p, idx) =>
+          parseParam(
+            p,
+            {
+              layerId: '',
+              layerShortName: '',
+              serviceId: '',
+              serviceShortName: '',
+              messageKind: 'TABLE-STRUCTURE',
+              parentName: h.getText(rowEl, 'SHORT-NAME'),
+              paramIndex: idx
+            },
+            idIndex,
+            h
+          )
+        );
+
+      structure = {
+        id: refId,
+        shortName: h.getText(structEl, 'SHORT-NAME'),
+        longName: h.getText(structEl, 'LONG-NAME'),
+        params
+      };
+    }
+  }
+
+  return {
+    id: h.getAttr(rowEl, 'ID') || '',
+    shortName: h.getText(rowEl, 'SHORT-NAME'),
+    longName: h.getText(rowEl, 'LONG-NAME'),
+    description: extractDescriptionText(h.getFirstNS(rowEl, 'DESC')),
+    key: h.getText(rowEl, 'KEY'),
+    structure,
+  };
+};
+
+
+// ============================================================================
+// TABLE
+// ============================================================================
+export const parseTable = (tableEl, h, idIndex) => {
+  const rows = h.getElementsNS(tableEl, 'TABLE-ROW')
+    .map(r => parseTableRow(r, h, idIndex));
+
+  const keyDopRef = h.getFirstNS(tableEl, 'KEY-DOP-REF');
+  const keyDopRefId = keyDopRef
+    ? (h.getAttr(keyDopRef, 'ID-REF') || h.getAttr(keyDopRef, 'id-ref'))
+    : '';
+
+  return {
+    id: h.getAttr(tableEl, 'ID') || '',
+    semantic: h.getAttr(tableEl, 'SEMANTIC') || '',
+    shortName: h.getText(tableEl, 'SHORT-NAME'),
+    longName: h.getText(tableEl, 'LONG-NAME'),
+    keyDopRefId,
+    rows
+  };
+};
+
+
+// ============================================================================
 // DIAG LAYER
 // ============================================================================
 export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
@@ -277,14 +381,12 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
   const layerShortName = h.getText(layerEl, 'SHORT-NAME');
   const layerLongName = h.getText(layerEl, 'LONG-NAME');
   const layerId = attrs['ID'] || attrs['id'] || '';
-
   const parentRefEl = h.getFirstNS(layerEl, 'PARENT-REF');
 
   const requestMap = new Map();
   const posMap = new Map();
   const negMap = new Map();
 
-  // REQUEST
   h.getElementsNS(layerEl, 'REQUEST').forEach(reqEl => {
     const id = h.getAttr(reqEl, 'ID') || h.getAttr(reqEl, 'id');
     const reqShortName = h.getText(reqEl, 'SHORT-NAME');
@@ -307,8 +409,6 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
-
-  // POS RESPONSE
   h.getElementsNS(layerEl, 'POS-RESPONSE').forEach(resEl => {
     const id = h.getAttr(resEl, 'ID') || h.getAttr(resEl, 'id');
     const resShortName = h.getText(resEl, 'SHORT-NAME');
@@ -331,8 +431,6 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
-
-  // NEG RESPONSE
   h.getElementsNS(layerEl, 'NEG-RESPONSE').forEach(resEl => {
     const id = h.getAttr(resEl, 'ID') || h.getAttr(resEl, 'id');
     const resShortName = h.getText(resEl, 'SHORT-NAME');
@@ -355,8 +453,6 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     });
   });
 
-
-  // SERVICES
   const services = h.getElementsNS(layerEl, 'DIAG-SERVICE').map(svcEl => {
     const svcAttrs = h.getAllAttrs(svcEl);
     const svcShortName = h.getText(svcEl, 'SHORT-NAME');
@@ -405,24 +501,17 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
       description: h.getText(svcEl, 'DESC'),
       semantic: svcAttrs['SEMANTIC'] || svcAttrs['semantic'] || '',
       addressing: svcAttrs['ADDRESSING'] || svcAttrs['addressing'] || '',
-
       request: stampParams(request, 'REQUEST'),
       posResponses: posResponses.map(r => stampParams(r, 'POS_RESPONSE')).filter(Boolean),
       negResponses: negResponses.map(r => stampParams(r, 'NEG_RESPONSE')).filter(Boolean),
-
       ...svcAttrs,
     };
   });
 
-  // ======================================================================
-  // DATA DICTIONARY - local scope support
-  // ======================================================================
   const units = [];
   const dataObjectProps = [];
   const compuMethods = [];
-
-  const dtcs = h.getElementsNS(layerEl, 'DTC')
-    .map(d => parseDTC(d, h));
+  const dtcs = h.getElementsNS(layerEl, 'DTC').map(d => parseDTC(d, h));
 
   const diagDataDict = h.getFirstNS(layerEl, 'DIAG-DATA-DICTIONARY-SPEC');
   if (diagDataDict) {
@@ -440,6 +529,9 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
   if (unitSpec)
     h.getElementsNS(unitSpec, 'UNIT')
       .forEach(u => units.push(parseUnit(u, h)));
+
+  const tables = h.getElementsNS(layerEl, 'TABLE')
+    .map(t => parseTable(t, h, idIndex));
 
   return {
     layerType: attrs['DIAG-LAYER-TYPE']
@@ -466,6 +558,7 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
     compuMethods,
     dataObjectProps,
     dtcs,
+    tables,
 
     ...attrs,
   };
@@ -473,11 +566,10 @@ export const parseDiagLayer = (layerEl, layerType, idIndex, h) => {
 
 
 // ============================================================================
-// LAYER CONTAINER — with FULL ID INDEXING
+// DIAG LAYER CONTAINER
 // ============================================================================
 export const parseDiagLayerContainer = (doc, h, idIndex = new Map()) => {
 
-  // Register any referenced XML element into index
   const registerTag = (root, tag) => {
     h.getElementsNS(root, tag).forEach(el => {
       const id = h.getAttr(el, 'ID') || h.getAttr(el, 'id');
@@ -485,19 +577,15 @@ export const parseDiagLayerContainer = (doc, h, idIndex = new Map()) => {
     });
   };
 
-  // Register inside DIAG-DATA-DICTIONARY (global + local)
   const registerDiagDataDict = (root) => {
-
     h.getElementsNS(root, 'DIAG-DATA-DICTIONARY-SPEC').forEach(dict => {
       registerTag(dict, 'DATA-OBJECT-PROP');
       registerTag(dict, 'STRUCTURE');
       registerTag(dict, 'UNIT');
       registerTag(dict, 'COMPU-METHOD');
     });
-
   };
 
-  // Global registrations
   registerTag(doc, 'STRUCTURE');
   registerTag(doc, 'DIAG-SERVICE');
   registerTag(doc, 'REQUEST');
@@ -511,7 +599,6 @@ export const parseDiagLayerContainer = (doc, h, idIndex = new Map()) => {
   registerDiagDataDict(doc);
   h.getElementsNS(doc, 'DIAG-LAYER').forEach(l => registerDiagDataDict(l));
 
-  // Container Output
   const container = {
     protocols: [],
     functionalGroups: [],
