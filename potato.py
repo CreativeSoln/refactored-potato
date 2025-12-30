@@ -1,4 +1,30 @@
+// ---------------------------------------------------------------------------
+// Auto Download JSON (Browser / Vite / Electron Renderer Safe)
+// ---------------------------------------------------------------------------
+export function autoDownloadJson(filename, data) {
+  const text = JSON.stringify(data, null, 2);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
 
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filename}.json`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  URL.revokeObjectURL(url);
+}
+
+
+ // ------------------------------------------------------------------
+  try {
+    autoDownloadJson("Parsed_ODX_Result", container);
+    console.log("✓ Auto JSON downloaded");
+  } catch (e) {
+    console.warn("Auto download failed:", e);
+  }
 
 console.log("TOTAL STRUCTURES:", [...idIndex.keys()].filter(k => k.startsWith("_")).length);
 console.log("Has Function_enable Structure?", idIndex.has("_2737"));   // PUT YOUR ID HERE
