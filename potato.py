@@ -1,3 +1,12 @@
+console.log("=== DATABASE STRUCTURE CHECK ===");
+console.log("Has allParams:", !!database?.allParams, "Count:", database?.allParams?.length);
+console.log("Has ecuVariants:", database?.ecuVariants?.length);
+console.log("Has baseVariants:", database?.baseVariants?.length);
+console.log("Has protocols:", database?.protocols?.length);
+console.log("Has functionalGroups:", database?.functionalGroups?.length);
+console.log("Has ecuSharedData:", database?.ecuSharedData?.length);
+
+
 // ---------------------------------------------------------------------------
 // Auto Download JSON (Browser / Vite / Electron Renderer Safe)
 // ---------------------------------------------------------------------------
