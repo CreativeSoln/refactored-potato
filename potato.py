@@ -1,3 +1,46 @@
+// ======================================================================
+// STRUCTURE SUPPORT  (resolve STRUCTURE via DOP-REF or DOP-SNREF)
+// ======================================================================
+let structureEl = null;
+
+// Case-1 : DOP-REF → resolve STRUCTURE by ID
+if (dopRefEl) {
+  const refId = h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref');
+  if (refId) structureEl = idIndex.get(refId);
+}
+
+// Case-2 : DOP-SNREF → resolve STRUCTURE by SHORT-NAME
+if (!structureEl && dopSnRef) {
+  const sn = h.getText(dopSnRef, 'SHORT-NAME');
+  for (const el of idIndex.values()) {
+    const s = h.getText(el, 'SHORT-NAME');
+    if (s && s === sn) {
+      structureEl = el;
+      break;
+    }
+  }
+}
+
+// If STRUCTURE found → parse its PARAM children recursively
+let structureChildren = [];
+if (structureEl) {
+  const structParams = h.getElementsNS(structureEl, 'PARAM');
+  structureChildren = structParams.map((childEl, idx) =>
+    parseParam(
+      childEl,
+      {
+        ...ctx,
+        parentName: h.getText(paramEl, 'SHORT-NAME'),
+        messageKind: 'STRUCTURE',
+        paramIndex: idx
+      },
+      idIndex,
+      h
+    )
+  );
+}
+
+
 
 h.getElementsNS(doc, 'STRUCTURE').forEach(s => {
    const id = h.getAttr(s, 'ID') || h.getAttr(s, 'id');
