@@ -1,3 +1,27 @@
+if (structureEl) {
+
+    const paramsNode = h.getFirstNS(structureEl, 'PARAMS');
+    const structParams = paramsNode
+        ? h.getElementsNS(paramsNode, 'PARAM')
+        : [];
+
+    if (structParams.length > 0) {
+        p.children = structParams.map((childEl, idx) =>
+            parseParam(
+                childEl,
+                { layerId, layerShortName, serviceId, serviceShortName,
+                  messageKind: 'STRUCTURE', parentName: shortName,
+                  paramIndex: idx },
+                idIndex,
+                h
+            )
+        );
+    }
+}
+
+
+
+
 let structParams = [];
 
 // Case-1: direct PARAM under STRUCTURE
