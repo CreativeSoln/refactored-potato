@@ -1,3 +1,36 @@
+let structParams = [];
+
+// Case-1: direct PARAM under STRUCTURE
+structParams = h.getElementsNS(structureEl, 'PARAM');
+
+// Case-2: PARAM inside PARAMS (your XML)
+if (structParams.length === 0) {
+    const paramsNode = h.getFirstNS(structureEl, 'PARAMS');
+    if (paramsNode)
+        structParams = h.getElementsNS(paramsNode, 'PARAM');
+}
+
+if (structParams.length > 0) {
+    p.children = structParams.map((childEl, idx) =>
+        parseParam(
+            childEl,
+            {
+                layerId,
+                layerShortName,
+                serviceId,
+                serviceShortName,
+                messageKind: 'STRUCTURE',
+                parentName: shortName,
+                paramIndex: idx,
+            },
+            idIndex,
+            h
+        )
+    );
+}
+
+
+
 const dopMap = new Map();
 dataObjectProps.forEach(dop => {
   dopMap.set(dop.id, dop);
