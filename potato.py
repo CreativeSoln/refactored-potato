@@ -1,3 +1,27 @@
+
+
+console.log("TOTAL STRUCTURES:", [...idIndex.keys()].filter(k => k.startsWith("_")).length);
+console.log("Has Function_enable Structure?", idIndex.has("_2737"));   // PUT YOUR ID HERE
+
+if (dopRefEl) {
+  const refId = h.getAttr(dopRefEl, 'ID-REF') || h.getAttr(dopRefEl, 'id-ref');
+  console.log("PARAM:", shortName, " → DOP REF =", refId);
+  dopNode = idIndex.get(refId);
+  console.log("DOP node found?", !!dopNode);
+}
+
+
+console.log("Checking STRUCTURE inside DOP:", h.getText(dopNode, "SHORT-NAME"));
+
+
+console.log("Inline structure?", !!structureEl);
+console.log("Resolved STRUCTURE by REF?", !!structureEl);
+
+console.log("STRUCTURE FOUND:", shortName);
+const structParams = h.getElementsNS(paramsNode, 'PARAM');
+console.log("PARAMS COUNT =", structParams.length);
+
+
 // ======================================================================
 // STRUCTURE SUPPORT  (resolve STRUCTURE via DOP-REF or DOP-SNREF)
 // ======================================================================
