@@ -7,16 +7,20 @@ SERVICE-ID-RES
 POS-SERVICE-ID
 NEG-SERVICE-ID
 
-function findSIDParam(params = []) {
-  return params.find(p => {
-    const s = p.semantic?.toUpperCase() || "";
-    const n = p.shortName?.toUpperCase() || "";
+// ================= SID  ==================
+const detectSID = (paramList = []) => {
+  if (!Array.isArray(paramList)) return null;
+
+  return paramList.find(p => {
+    const sem = (p.semantic || "").toUpperCase();
+    const sn  = (p.shortName || "").toUpperCase();
 
     return (
-      s === "SERVICE-ID" ||
-      s.includes("SERVICE-ID") ||
-      s === "SID" ||
-      n.includes("SID")
+      sem === "SERVICE-ID" ||
+      sem.includes("SERVICE-ID") ||
+      sem === "SID" ||
+      sn === "SID" ||
+      sn.includes("SID")
     );
-  });
-}
+  }) || null;
+};
