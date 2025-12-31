@@ -1,0 +1,53 @@
+export function parseCompuMethod(compuMethodNode = {}) {
+  if (!compuMethodNode || !compuMethodNode.CATEGORY) {
+    return { category: "IDENTICAL" };
+  }
+
+  const category = (compuMethodNode.CATEGORY || "").trim().toUpperCase();
+
+  const internal = compuMethodNode["COMPU-INTERNAL-TO-PHYS"];
+  if (!internal || !internal["COMPU-SCALES"]) {
+    return { category: "IDENTICAL" };
+  }
+
+  const scales = internal["COMPU-SCALES"]["COMPU-SCALE"];
+  const compuScales = Array.isArray(scales) ? scales : [scales];
+
+  // TEXTTABLE
+  if (category.includes("TEXTTABLE")) {
+    const table = compuScales.map(s => ({
+      lower: Number(s["LOWER-LIMIT"]),
+      upper: Number(s["UPPER-LIMIT"]),
+      text: s["COMPU-CONST"]?.VT || ""
+    }));
+
+    return {
+      category: "TEXTTABLE",
+      table
+    };
+  }
+
+  // LINEAR / SCALE-LINEAR
+  if (category.includes("LINEAR")) {
+    const scale = compuScales.find(s => s["COMPU-RATIONAL-COEFFS"]);
+    if (!scale) return { category: "IDENTICAL" };
+
+    const coeff = scale["COMPU-RATIONAL-COEFFS"];
+    const numerator = Array.isArray(coeff["COMPU-NUMERATOR"].V)
+      ? coeff["COMPU-NUMERATOR"].V.map(Number)
+      : [Number(coeff["COMPU-NUMERATOR"].V)];
+
+    const denominator = Number(coeff["COMPU-DENOMINATOR"]?.V || 1);
+
+    return {
+      category: "LINEAR",
+      lowerLimit: Number(scale["LOWER-LIMIT"] ?? 0),
+      upperLimit: Number(scale["UPPER-LIMIT"] ?? 0),
+      numerator,
+      denominator
+    };
+  }
+
+  // IDENTICAL
+  return { category: "IDENTICAL" };
+}
