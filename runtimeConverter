@@ -1,0 +1,25 @@
+export function decodeValue(raw, conversion) {
+  if (!conversion || !conversion.category) return raw;
+
+  switch (conversion.category) {
+    case "IDENTICAL":
+      return raw;
+
+    case "TEXTTABLE": {
+      const match = conversion.table.find(
+        t => raw >= t.lower && raw <= t.upper
+      );
+      return match ? match.text : raw;
+    }
+
+    case "LINEAR": {
+      const n = conversion.numerator?.[0] ?? 1;
+      const d = conversion.denominator ?? 1;
+      const value = (raw * n) / d;
+      return Number(value.toFixed(3));
+    }
+
+    default:
+      return raw;
+  }
+}
