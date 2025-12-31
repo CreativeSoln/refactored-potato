@@ -1,0 +1,225 @@
+import { useState, useCallback } from "react";
+import * as XLSX from "xlsx";
+
+// ============================================================
+// SID BUILDER
+// ============================================================
+function detectSID(p) {
+  if (!p) return "";
+
+  if (p.semantic?.toUpperCase().includes("IDENTIFICATION")) return "0x22";
+  if (p.semantic?.toUpperCase().includes("CURRENTDATA")) return "0x22";
+  if (p.semantic?.toUpperCase().includes("READ")) return "0x22";
+
+  return "0x22";
+}
+
+// ============================================================
+// COMPU PARSER
+// ============================================================
+function parseCompuMethod(compuMethodNode = {}) {
+  if (!compuMethodNode || !compuMethodNode.CATEGORY) {
+    return { category: "IDENTICAL" };
+  }
+
+  const category = (compuMethodNode.CATEGORY || "").trim().toUpperCase();
+
+  const internal = compuMethodNode["COMPU-INTERNAL-TO-PHYS"];
+  if (!internal || !internal["COMPU-SCALES"]) {
+    return { category: "IDENTICAL" };
+  }
+
+  const scales = internal["COMPU-SCALES"]["COMPU-SCALE"];
+  const compuScales = Array.isArray(scales) ? scales : [scales];
+
+  // TEXTTABLE
+  if (category.includes("TEXTTABLE")) {
+    const table = compuScales.map(s => ({
+      lower: Number(s["LOWER-LIMIT"]),
+      upper: Number(s["UPPER-LIMIT"]),
+      text: s["COMPU-CONST"]?.VT || ""
+    }));
+
+    return {
+      category: "TEXTTABLE",
+      table
+    };
+  }
+
+  // LINEAR / SCALE-LINEAR
+  if (category.includes("LINEAR")) {
+    const scale = compuScales.find(s => s["COMPU-RATIONAL-COEFFS"]);
+    if (!scale) return { category: "IDENTICAL" };
+
+    const coeff = scale["COMPU-RATIONAL-COEFFS"];
+    const numerator = Array.isArray(coeff["COMPU-NUMERATOR"].V)
+      ? coeff["COMPU-NUMERATOR"].V.map(Number)
+      : [Number(coeff["COMPU-NUMERATOR"].V)];
+
+    const denominator = Number(coeff["COMPU-DENOMINATOR"]?.V || 1);
+
+    return {
+      category: "LINEAR",
+      lowerLimit: Number(scale["LOWER-LIMIT"] ?? 0),
+      upperLimit: Number(scale["UPPER-LIMIT"] ?? 0),
+      numerator,
+      denominator
+    };
+  }
+
+  return { category: "IDENTICAL" };
+}
+
+// ============================================================
+// RUNTIME DECODER
+// ============================================================
+function decodeValue(raw, conversion) {
+  if (!conversion || !conversion.category) return raw;
+
+  switch (conversion.category) {
+    case "IDENTICAL":
+      return raw;
+
+    case "TEXTTABLE": {
+      const match = conversion.table.find(
+        t => raw >= t.lower && raw <= t.upper
+      );
+      return match ? match.text : raw;
+    }
+
+    case "LINEAR": {
+      const n = conversion.numerator?.[0] ?? 1;
+      const d = conversion.denominator ?? 1;
+      return Number(((raw * n) / d).toFixed(3));
+    }
+
+    default:
+      return raw;
+  }
+}
+
+// ============================================================
+// MAIN EXPORT HOOK
+// ============================================================
+export const useExport = (database, selectedParams) => {
+  const [exportStatus, setExportStatus] = useState(null);
+  const [showJsonMenu, setShowJsonMenu] = useState(false);
+  const [showExcelMenu, setShowExcelMenu] = useState(false);
+
+  const getParamsForExport = useCallback(
+    (exportSelected = false) => {
+      if (!database) return [];
+      return exportSelected
+        ? database.allParams.filter(p => selectedParams.has(p.id))
+        : database.allParams;
+    },
+    [database, selectedParams]
+  );
+
+  // ============================================================
+  // BUILD FINAL JSON GROUP STRUCTURE
+  // ============================================================
+  const exportDiagnosticJSON = useCallback(() => {
+    if (!database || !database.allParams) {
+      console.warn("No database loaded");
+      return;
+    }
+
+    const groups = database.allParams.map(p => {
+      const sid = detectSID(p);
+      const compu = parseCompuMethod(p.compuMethod);
+
+      return {
+        service: "ReadDataByIdentifier",
+        sid,
+        did: p.shortName || "UNKNOWN",
+        direction:
+          p.parentType === "REQUEST"
+            ? "REQUEST"
+            : p.parentType === "POS_RESPONSE"
+            ? "RESPONSE_POS"
+            : "RESPONSE_NEG",
+
+        semantic: p.semantic || "",
+        description: p.description || "",
+
+        runtime: {
+          supportsSimulation: true,
+          sampleRequestHex: "", // can be later enhanced
+          sampleResponseHex: "",
+          decodedSample: {}
+        },
+
+        selection: {
+          type: "structureLeaf",
+          structure: [
+            {
+              path: `DataBlock.${p.shortName}`,
+              arrayIndex: 0,
+              arrayName: p.shortName,
+              topStruct: "",
+              children: []
+            }
+          ]
+        },
+
+        finalParameters: [
+          {
+            name: p.shortName,
+            path: `DataBlock.${p.shortName}`,
+            arrayIndex: 0,
+            dataType: p.baseDataType || "",
+            bitlength: Number(p.bitLength || 0),
+            endianness: p.isHighLowByteOrder ? "MOTOROLA" : "INTEL",
+            description: p.description || "",
+            conversion: compu,
+            samplePhysicalValue: p.sampleRawValue
+              ? decodeValue(p.sampleRawValue, compu)
+              : null
+          }
+        ]
+      };
+    });
+
+    const exportJson = {
+      meta: {
+        formatVersion: "1.2",
+        toolName: "DiagnosticUI",
+        createdDate: new Date().toISOString()
+      },
+      ecuInfo: {
+        ecuName: "UNKNOWN",
+        variant: "AUTO",
+        description: "Auto exported diagnostic map"
+      },
+      read_did_groups: groups
+    };
+
+    const blob = new Blob([JSON.stringify(exportJson, null, 2)], {
+      type: "application/json"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ecu_diagnostic_structure_combined.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    console.log(
+      `Diagnostic JSON Export Complete - ${database.allParams.length} params`
+    );
+  }, [database]);
+
+  return {
+    exportStatus,
+    showJsonMenu,
+    setShowJsonMenu,
+    showExcelMenu,
+    setShowExcelMenu,
+    exportDiagnosticJSON,
+    getParamsForExport
+  };
+};
