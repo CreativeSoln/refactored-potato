@@ -1,3 +1,58 @@
+  // =========================
+  const toHex = v => Number(v).toString(16).padStart(2, "0").toUpperCase();
+
+  const buildSampleRequest = (sidHex, didHex) => {
+    if (!sidHex || !didHex) return "";
+    return `${sidHex.replace(/^0x/, "")} ${didHex.replace(/^0x/, "")}`.toUpperCase();
+  };
+
+  const buildPositiveSID = sidHex => {
+    if (!sidHex) return "";
+    const v = parseInt(sidHex, 16);
+    return toHex(v + 0x40);
+  };
+
+
+  // ========================= Decode the response parameters
+  const decodeParamValue = (p) => {
+    if (!p) return {};
+    return {
+      Value:
+        p.physConstValue ||
+        p.codedConstValue ||
+        p.defaultValue ||
+        ""
+    };
+  };
+
+
+// --- Runtime Values ---
+      const requestHex = buildSampleRequest(sid, did);
+      const posSid = buildPositiveSID(sid);
+
+      const sampleResponse =
+        `${posSid} ${did.replace(/^0x/, "")}`.trim();
+
+      const decoded = decodeParamValue(p);
+ 
+  // ========================= Extrat=ct DID
+  const extractDID = (paramList = []) => {
+    const didParam = paramList.find(p =>
+      (p.semantic || "").toUpperCase().includes("IDENTIFIER") ||
+      (p.shortName || "").toUpperCase().includes("DID") ||
+      (p.shortName || "").toUpperCase().includes("IDENTIFIER")
+    );
+
+    if (!didParam) return null;
+
+    return (
+      didParam.codedConstValue ||
+      didParam.physConstValue ||
+      didParam.defaultValue ||
+      null
+    );
+  };
+
 Retrieve SID:
 
 SERVICE-ID
