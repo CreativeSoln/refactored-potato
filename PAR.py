@@ -44,7 +44,7 @@ def safe_asdict(obj):
     return obj
 
 # =====================================================================================
-# XML helpers (ALL RETURN str SAFELY)
+# XML helpers (Pylance-safe)
 # =====================================================================================
 
 def local_name(tag: str) -> str:
@@ -117,7 +117,7 @@ def extract_coded_value(el: Optional[ET.Element]) -> str:
     )
 
 # =====================================================================================
-# Robust XML bytes parser
+# Robust XML bytes parsing
 # =====================================================================================
 
 def _try_parse_bytes(raw: bytes) -> ET.Element:
@@ -155,7 +155,7 @@ def harvest_structures(layer_el: ET.Element) -> Tuple[Dict[str, List[ET.Element]
     return by_id, by_sn
 
 # =====================================================================================
-# Main parser
+# MAIN PARSER
 # =====================================================================================
 
 class ODXParser:
@@ -208,12 +208,14 @@ class ODXParser:
         return db
 
     # ------------------------------------------------------------------
-    # PARAM parsing
+    # PARAM parsing (WITH TABLE-KEY)
     # ------------------------------------------------------------------
 
     def _try_parse_param(self, *a, **kw) -> Optional[OdxParam]:
         try:
             return self.parse_param(*a, **kw)
+        except AssertionError:
+            raise
         except Exception as e:
             logger.warning("PARAM skipped: %s", e)
             return None
@@ -234,6 +236,8 @@ class ODXParser:
     ) -> OdxParam:
 
         short = get_text_local(param_el, "SHORT-NAME")
+        assert short, "PARAM without SHORT-NAME"
+
         diag = find_child(param_el, "DIAG-CODED-TYPE")
         phys = find_child(param_el, "PHYSICAL-TYPE")
         dop_ref = find_child(param_el, "DOP-REF")
@@ -268,6 +272,7 @@ class ODXParser:
 
         next_path = f"{parentPath}.{short}" if parentPath else short
 
+        # ---------- DOP STRUCTURE ----------
         dop = dop_by_id.get(p.dopRefId) or dop_by_sn.get(p.dopSnRefName)
         if dop and dop.structureParams:
             for c in dop.structureParams:
@@ -280,15 +285,49 @@ class ODXParser:
                 if cp:
                     p.children.append(cp)
 
+        # ---------- TABLE-KEY ----------
+        table_key_el = find_child(diag, "TABLE-KEY") if diag else None
+        if table_key_el is not None:
+            table_ref = find_child(table_key_el, "TABLE-REF")
+            table_id = get_attr(table_ref, "ID-REF") if table_ref else ""
+
+            table = table_by_id.get(table_id)
+            assert table is not None, f"TABLE-KEY references missing TABLE id={table_id}"
+
+            key_value = extract_coded_value(table_key_el)
+            assert key_value, f"Empty TABLE-KEY for param {p.shortName}"
+
+            matched = None
+            for r in table["rows"]:
+                if r["key"] == key_value:
+                    matched = r
+                    break
+
+            assert matched is not None, (
+                f"No TABLE-ROW for key={key_value} table={table_id}"
+            )
+
+            for c in matched["structParams"]:
+                cp = self._try_parse_param(
+                    c, "STRUCTURE", next_path,
+                    layerName, serviceShortName,
+                    dop_by_id, dop_by_sn, dop_meta_by_id,
+                    struct_by_id, struct_by_sn, table_by_id
+                )
+                if cp:
+                    p.children.append(cp)
+
         return p
 
     # ------------------------------------------------------------------
-    # Layer parsing
+    # LAYER parsing (TABLE harvesting)
     # ------------------------------------------------------------------
 
     def _parse_layer(self, layer_el: ET.Element, layerType: str) -> OdxLayer:
         layer_short = get_text_local(layer_el, "SHORT-NAME")
+
         struct_by_id, struct_by_sn = harvest_structures(layer_el)
+
         dop_by_id: Dict[str, OdxDataObjectProp] = {}
         dop_by_sn: Dict[str, OdxDataObjectProp] = {}
 
@@ -306,6 +345,28 @@ class ODXParser:
             dop_by_id[dop.id] = dop
             dop_by_sn[dop.shortName] = dop
 
+        # ---------- TABLE harvesting ----------
+        table_by_id: Dict[str, Dict] = {}
+        for tbl in findall_descendants(layer_el, "TABLE"):
+            tid = get_attr(tbl, "ID")
+            key_dop_ref = get_attr(find_child(tbl, "KEY-DOP-REF"), "ID-REF")
+
+            rows = []
+            for tr in find_children(tbl, "TABLE-ROW"):
+                s = find_child(tr, "STRUCTURE")
+                pb = find_child(s, "PARAMS") if s else None
+                rows.append({
+                    "key": get_attr(tr, "KEY"),
+                    "structParams": find_children(pb, "PARAM") if pb else [],
+                })
+
+            if tid:
+                assert rows, f"TABLE {tid} has no TABLE-ROW"
+                table_by_id[tid] = {
+                    "keyDopRefId": key_dop_ref,
+                    "rows": rows,
+                }
+
         services: List[OdxService] = []
 
         for svc in findall_descendants(layer_el, "DIAG-SERVICE"):
@@ -320,7 +381,7 @@ class ODXParser:
                         p, "REQUEST", svc_short,
                         layer_short, svc_short,
                         dop_by_id, dop_by_sn, {},
-                        struct_by_id, struct_by_sn, {}
+                        struct_by_id, struct_by_sn, table_by_id
                     )
                     if rp:
                         params.append(rp)
@@ -336,7 +397,7 @@ class ODXParser:
                         p, "POS_RESPONSE", f"{svc_short}.POS",
                         layer_short, svc_short,
                         dop_by_id, dop_by_sn, {},
-                        struct_by_id, struct_by_sn, {}
+                        struct_by_id, struct_by_sn, table_by_id
                     )
                     if rp:
                         params.append(rp)
@@ -349,7 +410,7 @@ class ODXParser:
                         p, "NEG_RESPONSE", f"{svc_short}.NEG",
                         layer_short, svc_short,
                         dop_by_id, dop_by_sn, {},
-                        struct_by_id, struct_by_sn, {}
+                        struct_by_id, struct_by_sn, table_by_id
                     )
                     if rp:
                         params.append(rp)
@@ -373,7 +434,7 @@ class ODXParser:
         )
 
     # ------------------------------------------------------------------
-    # Inheritance helpers (minimal, Pylance-safe)
+    # Inheritance helpers (minimal, safe)
     # ------------------------------------------------------------------
 
     def _resolve_links_for_layer(
@@ -388,9 +449,8 @@ class ODXParser:
         seen = set()
         uniq = []
         for svc in layer.services:
-            key = svc.shortName
-            if key in seen:
+            if svc.shortName in seen:
                 continue
-            seen.add(key)
+            seen.add(svc.shortName)
             uniq.append(svc)
         layer.services = uniq
