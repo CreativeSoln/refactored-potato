@@ -202,9 +202,27 @@ class ODXParser:
         return filename, self.parse_container(root)
 
     def _ensure_container(self, root: ET.Element) -> ET.Element:
-        if local_name(root.tag) == "DIAG-LAYER-CONTAINER":
-            return root
-        return findall_descendants(root, "DIAG-LAYER-CONTAINER")[0]
+    """
+    Ensure we have a valid container root.
+
+    Real-world ODX files MAY NOT contain DIAG-LAYER-CONTAINER.
+    In that case, treat the document root as the container.
+    """
+
+    # Case 1: root itself is the container
+    if local_name(root.tag) == "DIAG-LAYER-CONTAINER":
+        return root
+
+    # Case 2: container exists somewhere below
+    containers = findall_descendants(root, "DIAG-LAYER-CONTAINER")
+    if containers:
+        return containers[0]
+
+    # Case 3: NO container exists (very common in vendor ODX)
+    # → Use root safely
+    print("[ODXParser] WARNING: DIAG-LAYER-CONTAINER not found, using root element")
+    return root
+
 
     def _parse_layer(self, layer_el: ET.Element, layer_type: str) -> OdxLayer:
         struct_by_id, struct_by_sn = harvest_structures(layer_el)
