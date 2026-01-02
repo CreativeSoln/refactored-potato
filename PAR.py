@@ -224,13 +224,13 @@ class ODXParser:
         parentPath: str,
         layerName: str,
         serviceShortName: str,
-        dop_by_id: Dict[str, "OdxDataObjectProp"],
-        dop_by_sn: Dict[str, "OdxDataObjectProp"],
+        dop_by_id: Dict[str, OdxDataObjectProp],
+        dop_by_sn: Dict[str, OdxDataObjectProp],
         dop_meta_by_id: Dict[str, Dict[str, str]],
         struct_by_id: Dict[str, List[ET.Element]],
         struct_by_sn: Dict[str, List[ET.Element]],
         table_by_id: Dict[str, Dict],
-    ) -> Optional["OdxParam"]:
+    ) -> Optional[OdxParam]:
         try:
             return self.parse_param(
                 param_el,
@@ -252,8 +252,8 @@ class ODXParser:
 
     def _fill_from_dop_if_missing(
             self,
-            p: "OdxParam",
-            dop: Optional["OdxDataObjectProp"],
+            p: OdxParam,
+            dop: Optional[OdxDataObjectProp],
             dop_meta_by_id: Dict[str, Dict[str, str]],
         ) -> None:
             meta: Dict[str, str] = {}
@@ -286,14 +286,14 @@ class ODXParser:
 
     def _annotate_service_name(
             self,
-            params: List["OdxParam"],
+            params: List[OdxParam],
             svc_short: str
         ) -> None:
         """Set serviceShortName on params and their children."""
         if not params:
             return
 
-        stack: List["OdxParam"] = [p for p in params if isinstance(p, OdxParam)]
+        stack: List[OdxParam] = [p for p in params if isinstance(p, OdxParam)]
 
         while stack:
             node = stack.pop()
@@ -306,14 +306,14 @@ class ODXParser:
 
     def _prefix_path(
         self,
-        params: List["OdxParam"],
+        params: List[OdxParam],
         prefix: str
     ) -> None:
         """Prefix parentName for each param (and children) with 'prefix.'."""
         if not params or not prefix:
             return
 
-        stack: List["OdxParam"] = [p for p in params if isinstance(p, OdxParam)]
+        stack: List[OdxParam] = [p for p in params if isinstance(p, OdxParam)]
 
         while stack:
             node = stack.pop()
@@ -331,7 +331,7 @@ class ODXParser:
         dop_el: ET.Element,
         struct_by_id: Dict[str, List[ET.Element]],
         struct_by_sn: Dict[str, List[ET.Element]],
-    ) -> Tuple["OdxDataObjectProp", Dict[str, str]]:
+    ) -> Tuple[OdxDataObjectProp, Dict[str, str]]:
 
             diagCodedType = find_child(dop_el, "DIAG-CODED-TYPE")
             physType = find_child(dop_el, "PHYSICAL-TYPE")
@@ -711,7 +711,8 @@ class ODXParser:
                     attached_pos_ids.add(rid)
 
             for el in inline_pos:
-                rshort = get_text_local(el, "SHORT-NAME") or (svc_short + "_pos")
+                rshort = get_text_local(el, "SHORT-NAME") or (f"{svc_short}_pos" if svc_short else "_pos")
+                rid_inline = get_attr(el, "ID")
                 root_path = svc_short if svc_short else ""
                 root_path = f"{root_path}.{rshort}" if rshort else root_path
 
@@ -735,13 +736,15 @@ class ODXParser:
 
                 self._annotate_service_name(rparams, svc_short)
                 pos_responses.append(
-                    OdxMessage(
-                        id=get_attr(el, "ID"),
+        OdxMessage(
+            id=rid_inline,
                         shortName=rshort,
                         longName=get_text_local(el, "LONG-NAME"),
                         params=rparams,
                     )
                 )
+        if rid_inline:
+            attached_pos_ids.add(rid_inline)
 
             # ----------------------------
             # NEG RESPONSES
@@ -758,7 +761,8 @@ class ODXParser:
                     attached_neg_ids.add(rid)
 
             for el in inline_neg:
-                rshort = get_text_local(el, "SHORT-NAME") or (svc_short + "_neg")
+                rshort = get_text_local(el, "SHORT-NAME") or (f"{svc_short}_neg" if svc_short else "_neg")
+                rid_inline = get_attr(el, "ID")
                 root_path = svc_short if svc_short else ""
                 root_path = f"{root_path}.{rshort}" if rshort else root_path
 
@@ -782,13 +786,15 @@ class ODXParser:
 
                 self._annotate_service_name(rparams, svc_short)
                 neg_responses.append(
-                    OdxMessage(
-                        id=get_attr(el, "ID"),
+        OdxMessage(
+            id=rid_inline,
                         shortName=rshort,
                         longName=get_text_local(el, "LONG-NAME"),
                         params=rparams,
                     )
                 )
+        if rid_inline:
+            attached_neg_ids.add(rid_inline)
 
             services.append(
                 OdxService(
@@ -806,7 +812,42 @@ class ODXParser:
             )
 
         # ------------------------------------------------------------
-        # Layer metadata
+        
+        # ---- Fallback: attach orphan POS/NEG responses by name (case-normalized)
+        def _looks_like_belongs(resp_short: str, svc_short: str) -> bool:
+            if not resp_short or not svc_short:
+                return False
+            rs = (resp_short or '').strip().lower()
+            ss = (svc_short or '').strip().lower()
+            return rs == ss or rs.startswith(ss) or ss in rs
+
+        # Orphan POS responses
+        for rid, orphan in list(pos_resp_map.items()):
+            if rid in attached_pos_ids:
+                continue
+            for svc in services:
+                if _looks_like_belongs(orphan.shortName, svc.shortName):
+                    prefix = f"{svc.shortName}.{orphan.shortName or 'PosResponse'}" if svc.shortName else (orphan.shortName or '')
+                    self._prefix_path(orphan.params, prefix)
+                    self._annotate_service_name(orphan.params, svc.shortName or '')
+                    svc.posResponses.append(orphan)
+                    attached_pos_ids.add(rid)
+                    break
+
+        # Orphan NEG responses
+        for rid, orphan in list(neg_resp_map.items()):
+            if rid in attached_neg_ids:
+                continue
+            for svc in services:
+                if _looks_like_belongs(orphan.shortName, svc.shortName):
+                    prefix = f"{svc.shortName}.{orphan.shortName or 'NegResponse'}" if svc.shortName else (orphan.shortName or '')
+                    self._prefix_path(orphan.params, prefix)
+                    self._annotate_service_name(orphan.params, svc.shortName or '')
+                    svc.negResponses.append(orphan)
+                    attached_neg_ids.add(rid)
+                    break
+
+# Layer metadata
         # ------------------------------------------------------------
         parent_id = get_attr(find_child(layer_el, "PARENT-REF"), "ID-REF") or ""
         linked_ids = self._collect_links(layer_el)
@@ -930,7 +971,7 @@ class ODXParser:
 
     def parse_odx_file(self, filename: str, content: str) -> Tuple[str, OdxContainer]:
         return self.parse_odx_bytes(filename, content.encode("utf-8", errors="ignore"))
-
+        return root
 
     # =====================================================================================
     # UNIT PARSER 
@@ -1091,7 +1132,7 @@ class ODXParser:
             maxLength=get_text_local(diagCodedType, "MAX-LENGTH") if diagCodedType else "",
             baseDataType=get_attr(diagCodedType, "BASE-DATA-TYPE") if diagCodedType else "",
             physicalBaseType=get_attr(physType, "BASE-DATA-TYPE") if physType else "",
-            isHighLowByteOrder=get_attr(diagCodedType, "IS-HIGH-LOW-BYTE-ORDER") if diagCodedType else "",
+            isHighLowByteOrder=(get_attr(diagCodedType, "IS-HIGH-LOW-BYTE-ORDER") or get_attr(diagCodedType, "IS-HIGHLOW-BYTE-ORDER") if diagCodedType else ""),
             codedConstValue=coded_value,
             physConstValue=get_text_local(physConst, "V") if physConst else "",
             dopRefId=get_attr(dopRef, "ID-REF") if dopRef else "",
@@ -1209,28 +1250,33 @@ class ODXParser:
         if table_ref is not None:
             tbl_id = get_attr(table_ref, "ID-REF")
             tbl = table_by_id.get(tbl_id)
-
             if tbl:
-                for key_dop, dop_meta in tbl.get("keyParams", {}).items():
-                    row_label = dop_meta.get("shortName") or "Row"
-                    row_short = f"{row_label}_{uuid.uuid4().hex[:9]}"
-
+                key_dop_id = tbl.get("keyDopRefId", "")
+                key_dop = dop_by_id.get(key_dop_id) if key_dop_id else None
+                if key_dop:
+                    self._fill_from_dop_if_missing(p, key_dop, dop_meta_by_id)
+                for row in tbl.get("rows", []):
+                    key_val = row.get("key", "")
+                    base_label = row.get("shortName", "Row")
+                    label_with_key = f"{base_label} (KEY={key_val})" if key_val else base_label
+                    row_short = f"{label_with_key}_{uuid.uuid4().hex[:9]}"
                     row_param = OdxParam(
                         id=f"{pid}::{row_short}",
                         shortName=row_short,
-                        longName=row_label,
+                        longName=label_with_key,
                         description="",
                         semantic="TABLE-ROW",
                         parentType="TABLE-KEY",
                         parentName=next_path,
                         layerName=layerName,
                         serviceShortName=serviceShortName,
-                        attrs={"TABLE-SHORT-NAME": tbl.get("shortName", "")},
+                        attrs={
+                            "TABLE-SHORT-NAME": tbl.get("shortName", ""),
+                            "TABLE-ROW-KEY": key_val,
+                        },
                     )
-
                     row_next_path = f"{next_path}.{row_short}"
-
-                    for child_el in tbl.get("structParams", []):
+                    for child_el in row.get("structParams", []):
                         child = self._try_parse_param(
                             child_el,
                             "STRUCTURE",
@@ -1246,12 +1292,7 @@ class ODXParser:
                         )
                         if child is not None:
                             row_param.children.append(child)
-
                     p.children.append(row_param)
-
-        if p.children:
-            print(f"[STRUCTURE/TABLE] Expanded {p.shortName} -> {len(p.children)} child param(s)")
-
         return p
 
 
@@ -1343,7 +1384,7 @@ class ODXParser:
                         if(svc.id and svc.id in ni_ids):
                             continue
                         filtered_services.append(svc)
-                    ref_layer.services = filtered_services
+                    ref_layer.services.extend(filtered_services)
                 else:
                     layer.services.extend(ref.services)
                 
