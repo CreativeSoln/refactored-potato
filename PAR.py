@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import uuid
@@ -26,19 +27,10 @@ from models import (
 logger = logging.getLogger(__name__)
 
 # =====================================================================================
-# safe_asdict (AS REQUESTED – EXACT BEHAVIOR)
+# safe_asdict
 # =====================================================================================
 
 def safe_asdict(obj):
-    """
-    Safer than dataclasses.asdict:
-    - Dataclass -> dict (recursive)
-    - dict -> safe dict
-    - mapping views -> list
-    - list/tuple/set/frozenset -> list
-    - ET.Element -> return as-is
-    - else -> as-is
-    """
     if is_dataclass(obj):
         return {f.name: safe_asdict(getattr(obj, f.name)) for f in fields(obj)}
     if isinstance(obj, dict):
@@ -52,7 +44,7 @@ def safe_asdict(obj):
     return obj
 
 # =====================================================================================
-# XML helpers
+# XML helpers (ALL RETURN str SAFELY)
 # =====================================================================================
 
 def local_name(tag: str) -> str:
@@ -71,31 +63,34 @@ def find_children(el: Optional[ET.Element], name: str) -> List[ET.Element]:
         return []
     return [c for c in el if local_name(c.tag) == name]
 
-def findall_desc(el: Optional[ET.Element], name: str) -> List[ET.Element]:
+def findall_descendants(el: Optional[ET.Element], name: str) -> List[ET.Element]:
     if el is None:
         return []
     return [x for x in el.iter() if local_name(x.tag) == name]
 
-def text_of(el: Optional[ET.Element], name: str) -> str:
+def get_text_local(el: Optional[ET.Element], name: str) -> str:
     if el is None:
         return ""
     for c in el:
         if local_name(c.tag) == name:
-            return "".join(c.itertext()).strip()
+            txt = "".join(c.itertext())
+            return txt.strip() if isinstance(txt, str) else ""
     return ""
 
-def attr(el: Optional[ET.Element], name: str, default: str = "") -> str:
+def get_attr(el: Optional[ET.Element], name: str, default: str = "") -> str:
     if el is None:
         return default
-    return el.attrib.get(name, default)
+    v = el.attrib.get(name)
+    return v if isinstance(v, str) else default
 
-def attr_ci(el: Optional[ET.Element], *names: str) -> str:
+def get_attr_ci(el: Optional[ET.Element], *names: str) -> str:
     if el is None:
         return ""
     low = {k.lower(): v for k, v in el.attrib.items()}
     for n in names:
-        if n.lower() in low:
-            return low[n.lower()]
+        v = low.get(n.lower())
+        if isinstance(v, str):
+            return v
     return ""
 
 def first_text(el: Optional[ET.Element], names: List[str]) -> str:
@@ -103,8 +98,12 @@ def first_text(el: Optional[ET.Element], names: List[str]) -> str:
         return ""
     for n in names:
         for x in el.iter():
-            if local_name(x.tag) == n and (x.text or "").strip():
-                return x.text.strip()
+            if local_name(x.tag) == n:
+                txt = x.text
+                if isinstance(txt, str):
+                    txt = txt.strip()
+                    if txt:
+                        return txt
     return ""
 
 def extract_coded_value(el: Optional[ET.Element]) -> str:
@@ -113,15 +112,15 @@ def extract_coded_value(el: Optional[ET.Element]) -> str:
     return (
         first_text(el, ["CODED-VALUE"])
         or first_text(el, ["V"])
-        or attr_ci(el, "CODED-VALUE")
+        or get_attr_ci(el, "CODED-VALUE")
         or ""
     )
 
 # =====================================================================================
-# Robust XML bytes parsing (multi-encoding)
+# Robust XML bytes parser
 # =====================================================================================
 
-def parse_xml_bytes_robust(raw: bytes) -> ET.Element:
+def _try_parse_bytes(raw: bytes) -> ET.Element:
     i = raw.find(b"<")
     raw = raw if i <= 0 else raw[i:]
     for enc in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "latin-1"):
@@ -131,24 +130,28 @@ def parse_xml_bytes_robust(raw: bytes) -> ET.Element:
             txt = txt[txt.find("<"):]
             return ET.fromstring(txt.encode("utf-8"))
         except Exception:
-            pass
+            continue
     return ET.fromstring(raw)
 
 # =====================================================================================
-# Structure harvesting
+# STRUCTURE harvesting
 # =====================================================================================
 
-def harvest_structures(layer_el: ET.Element):
-    by_id, by_sn = {}, {}
-    for s in findall_desc(layer_el, "STRUCTURE"):
-        sid = attr(s, "ID")
-        sn = text_of(s, "SHORT-NAME")
+def harvest_structures(layer_el: ET.Element) -> Tuple[Dict[str, List[ET.Element]], Dict[str, List[ET.Element]]]:
+    by_id: Dict[str, List[ET.Element]] = {}
+    by_sn: Dict[str, List[ET.Element]] = {}
+
+    for s in findall_descendants(layer_el, "STRUCTURE"):
+        sid = get_attr(s, "ID")
+        ssn = get_text_local(s, "SHORT-NAME")
         pb = find_child(s, "PARAMS")
-        params = find_children(pb, "PARAM") if pb else findall_desc(s, "PARAM")
+        params = find_children(pb, "PARAM") if pb else findall_descendants(s, "PARAM")
+
         if sid:
             by_id[sid] = params
-        if sn:
-            by_sn[sn] = params
+        if ssn:
+            by_sn[ssn] = params
+
     return by_id, by_sn
 
 # =====================================================================================
@@ -167,8 +170,8 @@ class ODXParser:
         name = file_path.split("/")[-1].split("\\")[-1]
         return self.parse_odx_bytes(name, raw)
 
-    def parse_odx_bytes(self, filename: str, raw: bytes) -> Tuple[str, OdxContainer]:
-        root = parse_xml_bytes_robust(raw)
+    def parse_odx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
+        root = _try_parse_bytes(content)
         return filename, self.parse_container(root)
 
     # ------------------------------------------------------------------
@@ -177,7 +180,7 @@ class ODXParser:
 
     def parse_container(self, root: ET.Element) -> OdxContainer:
         cont = OdxContainer()
-        for ev in findall_desc(root, "ECU-VARIANT"):
+        for ev in findall_descendants(root, "ECU-VARIANT"):
             cont.ecuVariants.append(self._parse_layer(ev, "ECU-VARIANT"))
         return cont
 
@@ -186,19 +189,19 @@ class ODXParser:
         for c in containers:
             db.ecuVariants.extend(c.ecuVariants)
 
-        # --- inheritance resolution (2 passes, NOT-INHERITED) ---
         for _ in range(2):
-            for l in db.ecuVariants:
-                self._resolve_links_for_layer(l)
+            for layer in db.ecuVariants:
+                self._resolve_links_for_layer(layer)
+                self._dedup_services(layer)
 
-        # --- flatten ---
         for layer in db.ecuVariants:
             for svc in layer.services:
-                for p in (svc.request.params if svc.request else []):
-                    p.layerName = layer.shortName
-                    db.allParams.append(p)
-                for r in svc.posResponses + svc.negResponses:
-                    for p in r.params:
+                if svc.request:
+                    for p in svc.request.params:
+                        p.layerName = layer.shortName
+                        db.allParams.append(p)
+                for msg in svc.posResponses + svc.negResponses:
+                    for p in msg.params:
                         p.layerName = layer.shortName
                         db.allParams.append(p)
 
@@ -208,7 +211,7 @@ class ODXParser:
     # PARAM parsing
     # ------------------------------------------------------------------
 
-    def _try_parse_param(self, *a, **kw):
+    def _try_parse_param(self, *a, **kw) -> Optional[OdxParam]:
         try:
             return self.parse_param(*a, **kw)
         except Exception as e:
@@ -230,7 +233,7 @@ class ODXParser:
         table_by_id: Dict[str, Dict],
     ) -> OdxParam:
 
-        short = text_of(param_el, "SHORT-NAME")
+        short = get_text_local(param_el, "SHORT-NAME")
         diag = find_child(param_el, "DIAG-CODED-TYPE")
         phys = find_child(param_el, "PHYSICAL-TYPE")
         dop_ref = find_child(param_el, "DOP-REF")
@@ -241,20 +244,21 @@ class ODXParser:
         p = OdxParam(
             id=pid,
             shortName=short,
-            longName=text_of(param_el, "LONG-NAME"),
-            description=text_of(param_el, "DESC"),
-            semantic=attr(param_el, "SEMANTIC"),
-            bytePosition=text_of(param_el, "BYTE-POSITION"),
-            bitPosition=text_of(param_el, "BIT-POSITION"),
-            bitLength=text_of(diag, "BIT-LENGTH"),
-            baseDataType=attr(diag, "BASE-DATA-TYPE"),
+            longName=get_text_local(param_el, "LONG-NAME"),
+            description=get_text_local(param_el, "DESC"),
+            semantic=get_attr(param_el, "SEMANTIC"),
+            bytePosition=get_text_local(param_el, "BYTE-POSITION"),
+            bitPosition=get_text_local(param_el, "BIT-POSITION"),
+            bitLength=get_text_local(diag, "BIT-LENGTH"),
+            baseDataType=get_attr(diag, "BASE-DATA-TYPE"),
+            physicalBaseType=get_attr(phys, "BASE-DATA-TYPE"),
             isHighLowByteOrder=(
-                attr(diag, "IS-HIGHLOW-BYTE-ORDER")
-                or attr(diag, "IS-HIGH-LOW-BYTE-ORDER")
+                get_attr(diag, "IS-HIGHLOW-BYTE-ORDER")
+                or get_attr(diag, "IS-HIGH-LOW-BYTE-ORDER")
             ),
             codedConstValue=extract_coded_value(param_el),
-            dopRefId=attr(dop_ref, "ID-REF"),
-            dopSnRefName=text_of(dop_sn, "SHORT-NAME"),
+            dopRefId=get_attr(dop_ref, "ID-REF"),
+            dopSnRefName=get_text_local(dop_sn, "SHORT-NAME"),
             parentType=parentType,
             parentName=parentPath,
             layerName=layerName,
@@ -279,21 +283,21 @@ class ODXParser:
         return p
 
     # ------------------------------------------------------------------
-    # LAYER parsing (POS/NEG inline + orphan fallback)
+    # Layer parsing
     # ------------------------------------------------------------------
 
     def _parse_layer(self, layer_el: ET.Element, layerType: str) -> OdxLayer:
-        layer_short = text_of(layer_el, "SHORT-NAME")
-
+        layer_short = get_text_local(layer_el, "SHORT-NAME")
         struct_by_id, struct_by_sn = harvest_structures(layer_el)
-        dop_by_id, dop_by_sn, dop_meta = {}, {}, {}
+        dop_by_id: Dict[str, OdxDataObjectProp] = {}
+        dop_by_sn: Dict[str, OdxDataObjectProp] = {}
 
-        for d in findall_desc(layer_el, "DATA-OBJECT-PROP"):
+        for d in findall_descendants(layer_el, "DATA-OBJECT-PROP"):
             dop = OdxDataObjectProp(
-                id=attr(d, "ID"),
-                shortName=text_of(d, "SHORT-NAME"),
-                longName=text_of(d, "LONG-NAME"),
-                description=text_of(d, "DESC"),
+                id=get_attr(d, "ID"),
+                shortName=get_text_local(d, "SHORT-NAME"),
+                longName=get_text_local(d, "LONG-NAME"),
+                description=get_text_local(d, "DESC"),
                 structureParams=[]
             )
             s = find_child(d, "STRUCTURE")
@@ -304,67 +308,56 @@ class ODXParser:
 
         services: List[OdxService] = []
 
-        for svc in findall_desc(layer_el, "DIAG-SERVICE"):
-            svc_short = text_of(svc, "SHORT-NAME")
+        for svc in findall_descendants(layer_el, "DIAG-SERVICE"):
+            svc_short = get_text_local(svc, "SHORT-NAME")
 
-            # ---------------- REQUEST ----------------
-            req_el = find_child(svc, "REQUEST")
             req = None
+            req_el = find_child(svc, "REQUEST")
             if req_el:
-                rps = []
+                params = []
                 for p in find_children(find_child(req_el, "PARAMS"), "PARAM"):
                     rp = self._try_parse_param(
                         p, "REQUEST", svc_short,
                         layer_short, svc_short,
-                        dop_by_id, dop_by_sn, dop_meta,
+                        dop_by_id, dop_by_sn, {},
                         struct_by_id, struct_by_sn, {}
                     )
                     if rp:
-                        rps.append(rp)
-                req = OdxMessage(id=attr(req_el, "ID"), shortName="REQUEST", params=rps)
+                        params.append(rp)
+                req = OdxMessage(id=get_attr(req_el, "ID"), shortName="REQUEST", params=params)
 
             pos_resps: List[OdxMessage] = []
             neg_resps: List[OdxMessage] = []
-            attached_pos_ids: Set[str] = set()
-            attached_neg_ids: Set[str] = set()
 
-            # ---------------- INLINE POS ----------------
             for el in find_children(svc, "POS-RESPONSE"):
-                rid = attr(el, "ID")
                 params = []
-                for p in findall_desc(el, "PARAM"):
+                for p in findall_descendants(el, "PARAM"):
                     rp = self._try_parse_param(
                         p, "POS_RESPONSE", f"{svc_short}.POS",
                         layer_short, svc_short,
-                        dop_by_id, dop_by_sn, dop_meta,
+                        dop_by_id, dop_by_sn, {},
                         struct_by_id, struct_by_sn, {}
                     )
                     if rp:
                         params.append(rp)
-                pos_resps.append(OdxMessage(id=rid, shortName="POS", params=params))
-                if rid:
-                    attached_pos_ids.add(rid)
+                pos_resps.append(OdxMessage(id=get_attr(el, "ID"), shortName="POS", params=params))
 
-            # ---------------- INLINE NEG ----------------
             for el in find_children(svc, "NEG-RESPONSE"):
-                rid = attr(el, "ID")
                 params = []
-                for p in findall_desc(el, "PARAM"):
+                for p in findall_descendants(el, "PARAM"):
                     rp = self._try_parse_param(
                         p, "NEG_RESPONSE", f"{svc_short}.NEG",
                         layer_short, svc_short,
-                        dop_by_id, dop_by_sn, dop_meta,
+                        dop_by_id, dop_by_sn, {},
                         struct_by_id, struct_by_sn, {}
                     )
                     if rp:
                         params.append(rp)
-                neg_resps.append(OdxMessage(id=rid, shortName="NEG", params=params))
-                if rid:
-                    attached_neg_ids.add(rid)
+                neg_resps.append(OdxMessage(id=get_attr(el, "ID"), shortName="NEG", params=params))
 
             services.append(
                 OdxService(
-                    id=attr(svc, "ID"),
+                    id=get_attr(svc, "ID"),
                     shortName=svc_short,
                     request=req,
                     posResponses=pos_resps,
@@ -374,16 +367,30 @@ class ODXParser:
 
         return OdxLayer(
             layerType=layerType,
-            id=attr(layer_el, "ID"),
+            id=get_attr(layer_el, "ID"),
             shortName=layer_short,
             services=services,
         )
 
     # ------------------------------------------------------------------
-    # Inheritance resolution stub (kept – invoked in merge)
+    # Inheritance helpers (minimal, Pylance-safe)
     # ------------------------------------------------------------------
 
-    def _resolve_links_for_layer(self, layer: OdxLayer):
-        # This method is intentionally minimal here.
-        # It is invoked (2 passes) to match parity behavior.
+    def _resolve_links_for_layer(
+        self,
+        layer: OdxLayer,
+        id_map: Optional[Dict[str, object]] = None,
+        visited: Optional[Set[str]] = None,
+    ) -> None:
         return
+
+    def _dedup_services(self, layer: OdxLayer) -> None:
+        seen = set()
+        uniq = []
+        for svc in layer.services:
+            key = svc.shortName
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(svc)
+        layer.services = uniq
