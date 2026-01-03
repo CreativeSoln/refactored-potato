@@ -16,3 +16,8 @@ def _format_did_value(self, raw) -> Optional[str]:
         return f"0x{did:04X}"
 
     return None
+
+fmt = self._format_did_value(raw)
+if fmt:
+    return fmt
+
