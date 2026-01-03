@@ -1,3 +1,9 @@
+if did_req_hex:
+    did_fmt = self._format_did_value(did_req_hex)
+    if did_fmt:
+        svc_info += f" | DID={did_fmt}"
+
+
 def _format_did_value(self, raw) -> Optional[str]:
     if raw is None:
         return None
