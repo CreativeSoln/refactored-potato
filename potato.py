@@ -1,3 +1,10 @@
+def _format_did(self, hb: list[int]) -> Optional[str]:
+    if not hb or len(hb) < 2:
+        return None
+    did = (hb[0] << 8) | hb[1]
+    return f"0x{did:04X}"
+
+
 def _detect_did_for_service_request_only(
     self, svc: OdxService
 ) -> Optional[str]:
