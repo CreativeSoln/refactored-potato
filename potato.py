@@ -1,4 +1,23 @@
 if did_req_hex:
+    try:
+        # normalize ANY hex form to int
+        s = str(did_req_hex).strip().lower()
+
+        if s.startswith("0x"):
+            val = int(s, 16)
+        else:
+            # handles "4df", "f190", "f1 90"
+            s = s.replace(" ", "")
+            val = int(s, 16)
+
+        svc_info += f" | DID=0x{val:04X}"
+
+    except Exception:
+        # fallback: show raw only if parsing fails
+        svc_info += f" | DID={did_req_hex}"
+
+
+if did_req_hex:
     did_fmt = self._format_did_value(did_req_hex)
     if did_fmt:
         svc_info += f" | DID={did_fmt}"
