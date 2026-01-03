@@ -2,6 +2,9 @@ from __future__ import annotations
 import uuid
 import re
 import html
+import logging
+
+logger = logging.getLogger(__name__)
 import xml.etree.ElementTree as ET
 from dataclasses import asdict
 from typing import List, Dict, Tuple, Optional, Set
@@ -246,7 +249,7 @@ class ODXParser:
                 table_by_id,
             )
         except Exception as ex:
-            print(f"[WARN] Skipping PARAM: {ex}")
+            logger.warning("Skipping PARAM: %s", ex, exc_info=True)
             return None
     
 
@@ -898,11 +901,7 @@ class ODXParser:
         evars = findall_descendants(container_el, "ECU-VARIANT")
         shared = findall_descendants(container_el, "ECU-SHARED-DATA")
 
-        print(f"[ODXParser] Found layers: PROTOCOL={len(protos)}, "
-              f"FUNCTIONAL-GROUP={len(fgroups)}, "
-              f"BASE-VARIANT={len(bvars)}, "
-              f"ECU-VARIANT={len(evars)}, "
-              f"ECU-SHARED-DATA={len(shared)}")
+        logger.info("[ODXParser] Found layers: PROTOCOL=%d, FUNCTIONAL-GROUP=%d, BASE-VARIANT=%d, ECU-VARIANT=%d, ECU-SHARED-DATA=%d", len(protos), len(fgroups), len(bvars), len(evars), len(shared))
 
         for p in protos:
             cont.protocols.append(self._parse_layer(p, "PROTOCOL"))
@@ -1091,7 +1090,7 @@ class ODXParser:
             maxLength=get_text_local(diagCodedType, "MAX-LENGTH") if diagCodedType else "",
             baseDataType=get_attr(diagCodedType, "BASE-DATA-TYPE") if diagCodedType else "",
             physicalBaseType=get_attr(physType, "BASE-DATA-TYPE") if physType else "",
-            isHighLowByteOrder=get_attr(diagCodedType, "IS-HIGH-LOW-BYTE-ORDER") if diagCodedType else "",
+            isHighLowByteOrder=(get_attr(diagCodedType, "IS-HIGH-LOW-BYTE-ORDER") or get_attr(diagCodedType, "IS-HIGHLOW-BYTE-ORDER")) if diagCodedType else "",
             codedConstValue=coded_value,
             physConstValue=get_text_local(physConst, "V") if physConst else "",
             dopRefId=get_attr(dopRef, "ID-REF") if dopRef else "",
@@ -1212,8 +1211,8 @@ class ODXParser:
 
             if tbl:
                 for key_dop, dop_meta in tbl.get("keyParams", {}).items():
-                    row_label = dop_meta.get("shortName") or "Row"
-                    row_short = f"{row_label}_{uuid.uuid4().hex[:9]}"
+                    identity = (row.get("id") or row.get("key") or row.get("shortName") or "Row")
+                    row_short = f"{tbl.get('shortName', 'Table')}-{identity}"
 
                     row_param = OdxParam(
                         id=f"{pid}::{row_short}",
@@ -1250,7 +1249,7 @@ class ODXParser:
                     p.children.append(row_param)
 
         if p.children:
-            print(f"[STRUCTURE/TABLE] Expanded {p.shortName} -> {len(p.children)} child param(s)")
+            logger.debug("[STRUCTURE/TABLE] Expanded %s -> %d child param(s)", p.shortName, len(p.children))
 
         return p
 
@@ -1343,7 +1342,7 @@ class ODXParser:
                         if(svc.id and svc.id in ni_ids):
                             continue
                         filtered_services.append(svc)
-                    ref_layer.services.extend(filtered_services)
+                    layer.services.extend(filtered_services)
                 else:
                     layer.services.extend(ref.services)
                 
