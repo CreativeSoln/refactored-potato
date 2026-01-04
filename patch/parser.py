@@ -361,10 +361,11 @@ class ODXParser:
         layer_short = get_text_local(layer_el, "SHORT-NAME")
         struct_by_id, struct_by_sn = harvest_structures(layer_el)
 
-        # DOPs + meta
+        # ---------------- DOPs ----------------
         dop_by_id: Dict[str, OdxDataObjectProp] = {}
         dop_by_sn: Dict[str, OdxDataObjectProp] = {}
         dop_meta_by_id: Dict[str, Dict[str, str]] = {}
+
         for d in findall_descendants(layer_el, "DATA-OBJECT-PROP"):
             dd, meta = self._parse_dop_with_struct_map(d, struct_by_id, struct_by_sn)
             dop_by_id[dd.id] = dd
@@ -372,36 +373,34 @@ class ODXParser:
             if dd.shortName:
                 dop_by_sn[dd.shortName] = dd
 
-        # TABLES (for TABLE-KEY)
+        # ---------------- TABLES ----------------
         table_by_id: Dict[str, Dict] = {}
         for t in findall_descendants(layer_el, "TABLE"):
             tid = get_attr(t, "ID")
             tsn = get_text_local(t, "SHORT-NAME")
             key_dop_ref = get_attr(find_child(t, "KEY-DOP-REF"), "ID-REF")
             rows = []
+
             for tr in findall_descendants(t, "TABLE-ROW"):
-                rid = get_attr(tr, "ID")
-                rsn = get_text_local(tr, "SHORT-NAME")
-                rln = get_text_local(tr, "LONG-NAME")
-                rdesc = get_text_local(tr, "DESC")
-                rkey = get_text_local(tr, "KEY")
+                struct_params = []
                 struct_ref = find_child(tr, "STRUCTURE-REF")
-                struct_params: List[ET.Element] = []
                 if struct_ref is not None:
-                    ref_id = get_attr(struct_ref, "ID-REF")
-                    ref_sn = get_text_local(struct_ref, "SHORT-NAME")
-                    if ref_id and ref_id in struct_by_id:
-                        struct_params = struct_by_id[ref_id]
-                    elif ref_sn and ref_sn in struct_by_sn:
-                        struct_params = struct_by_sn[ref_sn]
+                    rid = get_attr(struct_ref, "ID-REF")
+                    rsn = get_text_local(struct_ref, "SHORT-NAME")
+                    if rid and rid in struct_by_id:
+                        struct_params = struct_by_id[rid]
+                    elif rsn and rsn in struct_by_sn:
+                        struct_params = struct_by_sn[rsn]
+
                 rows.append({
-                    "id": rid,
-                    "shortName": rsn,
-                    "longName": rln,
-                    "desc": rdesc,
-                    "key": rkey,
+                    "id": get_attr(tr, "ID"),
+                    "shortName": get_text_local(tr, "SHORT-NAME"),
+                    "longName": get_text_local(tr, "LONG-NAME"),
+                    "desc": get_text_local(tr, "DESC"),
+                    "key": get_text_local(tr, "KEY"),
                     "structParams": struct_params,
                 })
+
             if tid:
                 table_by_id[tid] = {
                     "shortName": tsn,
@@ -409,283 +408,142 @@ class ODXParser:
                     "rows": rows,
                 }
 
-        # Units / Compu / DTC
-        units: List[OdxUnit] = [
-            self._parse_unit(u) for u in findall_descendants(layer_el, "UNIT")
-        ]
-        compu_methods: List[OdxCompuMethod] = [
-            self._parse_compu_method(c) for c in findall_descendants(layer_el, "COMPU-METHOD")
-        ]
-        dtcs: List[OdxDTC] = [
-            self._parse_dtc(d) for d in findall_descendants(layer_el, "DTC")
-        ]
-
-        def _all_pos_responses():
-            return list(pos_resp_map.values())
-
-
-        # Message maps
+        # ---------------- MESSAGES (standalone) ----------------
         request_map: Dict[str, OdxMessage] = {}
         pos_resp_map: Dict[str, OdxMessage] = {}
         neg_resp_map: Dict[str, OdxMessage] = {}
 
-        # Standalone REQUESTS
         for req in findall_descendants(layer_el, "REQUEST"):
             rid = get_attr(req, "ID")
-            rshort = get_text_local(req, "SHORT-NAME")
-            root_path = rshort or ""
-            rparams: List[OdxParam] = []
-            
-            param_blocks = (
-                    find_children(req, "PARAM")
-                    or findall_descendants(req, "PARAM")
+            rparams = []
+            for p_el in findall_descendants(req, "PARAM"):
+                p = self._try_parse_param(
+                    p_el, "REQUEST", get_text_local(req, "SHORT-NAME"),
+                    layer_short, "", dop_by_id, dop_by_sn,
+                    dop_meta_by_id, struct_by_id, struct_by_sn, table_by_id
                 )
-            for p_el in param_blocks:
-                rp = self._try_parse_param(
-                    p_el,
-                    "REQUEST",
-                    root_path,
-                    layer_short,
-                    "",
-                    dop_by_id,
-                    dop_by_sn,
-                    dop_meta_by_id,
-                    struct_by_id,
-                    struct_by_sn,
-                    table_by_id,
-                )
-                if rp is not None:
-                    rparams.append(rp)
+                if p:
+                    rparams.append(p)
             request_map[rid] = OdxMessage(
                 id=rid,
-                shortName=rshort,
+                shortName=get_text_local(req, "SHORT-NAME"),
                 longName=get_text_local(req, "LONG-NAME"),
                 params=rparams,
             )
 
-        # Standalone POS-RESPONSE
         for res in findall_descendants(layer_el, "POS-RESPONSE"):
             rid = get_attr(res, "ID")
-            rshort = get_text_local(res, "SHORT-NAME")
-            root_path = rshort or ""
-            rparams: List[OdxParam] = []
-
-            param_blocks = (
-                    find_children(res, "PARAM")
-                    or findall_descendants(res, "PARAM")
+            rparams = []
+            for p_el in findall_descendants(res, "PARAM"):
+                p = self._try_parse_param(
+                    p_el, "POS_RESPONSE", get_text_local(res, "SHORT-NAME"),
+                    layer_short, "", dop_by_id, dop_by_sn,
+                    dop_meta_by_id, struct_by_id, struct_by_sn, table_by_id
                 )
-            
-            for p_el in param_blocks:
-                rp = self._try_parse_param(
-                    p_el,
-                    "POS_RESPONSE",
-                    root_path,
-                    layer_short,
-                    "",
-                    dop_by_id,
-                    dop_by_sn,
-                    dop_meta_by_id,
-                    struct_by_id,
-                    struct_by_sn,
-                    table_by_id,
-                )
-                if rp is not None:
-                    rparams.append(rp)
-                pos_resp_map[rid] = OdxMessage(
+                if p:
+                    rparams.append(p)
+            pos_resp_map[rid] = OdxMessage(
                 id=rid,
-                shortName=rshort,
+                shortName=get_text_local(res, "SHORT-NAME"),
                 longName=get_text_local(res, "LONG-NAME"),
                 params=rparams,
             )
-            
 
-        # Standalone NEG-RESPONSE
         for res in findall_descendants(layer_el, "NEG-RESPONSE"):
             rid = get_attr(res, "ID")
-            rshort = get_text_local(res, "SHORT-NAME")
-            root_path = rshort or ""
-            rparams: List[OdxParam] = []
-
-            param_blocks = (
-                    find_children(res, "PARAM")
-                    or findall_descendants(res, "PARAM")
+            rparams = []
+            for p_el in findall_descendants(res, "PARAM"):
+                p = self._try_parse_param(
+                    p_el, "NEG_RESPONSE", get_text_local(res, "SHORT-NAME"),
+                    layer_short, "", dop_by_id, dop_by_sn,
+                    dop_meta_by_id, struct_by_id, struct_by_sn, table_by_id
                 )
-
-
-            for p_el in param_blocks:
-                rp = self._try_parse_param(
-                    p_el,
-                    "NEG_RESPONSE",
-                    root_path,
-                    layer_short,
-                    "",
-                    dop_by_id,
-                    dop_by_sn,
-                    dop_meta_by_id,
-                    struct_by_id,
-                    struct_by_sn,
-                    table_by_id,
-                )
-                if rp is not None:
-                    rparams.append(rp)
+                if p:
+                    rparams.append(p)
             neg_resp_map[rid] = OdxMessage(
                 id=rid,
-                shortName=rshort,
+                shortName=get_text_local(res, "SHORT-NAME"),
                 longName=get_text_local(res, "LONG-NAME"),
                 params=rparams,
             )
 
-        # SERVICES (inline + references)
+        # ---------------- SERVICES (FIXED) ----------------
         services: List[OdxService] = []
-        attached_pos_ids: Set[str] = set()
-        attached_neg_ids: Set[str] = set()
+
         for svc_el in findall_descendants(layer_el, "DIAG-SERVICE"):
             svc_attrs = get_all_attrs(svc_el)
             svc_short = get_text_local(svc_el, "SHORT-NAME")
-            request_ref = find_child(svc_el, "REQUEST-REF")
-            request_ref_id = get_attr(request_ref, "ID-REF") if request_ref is not None else ""
-            pos_ref_ids = [get_attr(r, "ID-REF") for r in find_children(svc_el, "POS-RESPONSE-REF")]
-            neg_ref_ids = [get_attr(r, "ID-REF") for r in find_children(svc_el, "NEG-RESPONSE-REF")]
-            inline_req = find_child(svc_el, "REQUEST")
-            inline_pos = find_children(svc_el, "POS-RESPONSE")
-            inline_neg = find_children(svc_el, "NEG-RESPONSE")
 
             # REQUEST
             request = None
-            if request_ref_id and request_ref_id in request_map:
-                request = request_map[request_ref_id]
-                prefix = f"{svc_short}.{request.shortName or 'Request'}" if svc_short else (request.shortName or "")
-                self._prefix_path(request.params, prefix)
-                self._annotate_service_name(request.params, svc_short)
-            elif inline_req is not None:
-                rshort = get_text_local(inline_req, "SHORT-NAME") or (svc_short + "_req")
-                root_path = svc_short if svc_short else ""
-                root_path = f"{root_path}.{rshort}" if rshort else root_path
-                rparams: List[OdxParam] = []
-                for p_el in findall_descendants(inline_req, "PARAM"):
-                    rp = self._try_parse_param(
-                        p_el,
-                        "REQUEST",
-                        root_path,
-                        layer_short,
-                        svc_short,
-                        dop_by_id,
-                        dop_by_sn,
-                        dop_meta_by_id,
-                        struct_by_id,
-                        struct_by_sn,
-                        table_by_id,
+            req_ref = find_child(svc_el, "REQUEST-REF")
+            if req_ref:
+                rid = get_attr(req_ref, "ID-REF")
+                if rid in request_map:
+                    request = request_map[rid]
+
+            # ---------------- POS RESPONSES (FIXED SCOPE) ----------------
+            pos_responses: List[OdxMessage] = []
+            for rref in find_children(svc_el, "POS-RESPONSE-REF"):
+                rid = get_attr(rref, "ID-REF")
+                if rid in pos_resp_map:
+                    pos_responses.append(self._clone_message(pos_resp_map[rid]))
+
+            for el in find_children(svc_el, "POS-RESPONSE"):
+                rparams = []
+                for p_el in findall_descendants(el, "PARAM"):
+                    p = self._try_parse_param(
+                        p_el, "POS_RESPONSE",
+                        f"{svc_short}.{get_text_local(el, 'SHORT-NAME')}",
+                        layer_short, svc_short,
+                        dop_by_id, dop_by_sn, dop_meta_by_id,
+                        struct_by_id, struct_by_sn, table_by_id
                     )
-                    if rp is not None:
-                        rparams.append(rp)
-                self._annotate_service_name(rparams, svc_short)
-                request = OdxMessage(
-                    id=get_attr(inline_req, "ID"),
-                    shortName=rshort,
-                    longName=get_text_local(inline_req, "LONG-NAME"),
-                    params=rparams,
+                    if p:
+                        rparams.append(p)
+                pos_responses.append(
+                    OdxMessage(
+                        id=get_attr(el, "ID"),
+                        shortName=get_text_local(el, "SHORT-NAME"),
+                        longName=get_text_local(el, "LONG-NAME"),
+                        params=rparams,
+                    )
                 )
 
-        # # ---------------- POS RESPONSES ----------------
-        pos_responses: List[OdxMessage] = []
+            # ---------------- NEG RESPONSES (FIXED SCOPE) ----------------
+            neg_responses: List[OdxMessage] = []
+            for rref in find_children(svc_el, "NEG-RESPONSE-REF"):
+                rid = get_attr(rref, "ID-REF")
+                if rid in neg_resp_map:
+                    neg_responses.append(self._clone_message(neg_resp_map[rid]))
 
-        # referenced POS responses
-        for rid in pos_ref_ids:
-            rr = pos_resp_map.get(rid)
-            if rr:
-                rr_copy = self._clone_message(rr)
-                prefix = f"{svc_short}.{rr_copy.shortName or 'PosResponse'}"
-                self._prefix_path(rr_copy.params, prefix)
-                self._annotate_service_name(rr_copy.params, svc_short)
-                pos_responses.append(rr_copy)
-
-        # inline POS responses
-        for el in inline_pos:
-            rshort = get_text_local(el, "SHORT-NAME") or f"{svc_short}_pos"
-            root_path = f"{svc_short}.{rshort}"
-            rparams: List[OdxParam] = []
-
-            for p_el in findall_descendants(el, "PARAM"):
-                rp = self._try_parse_param(
-                    p_el,
-                    "POS_RESPONSE",
-                    root_path,
-                    layer_short,
-                    svc_short,
-                    dop_by_id,
-                    dop_by_sn,
-                    dop_meta_by_id,
-                    struct_by_id,
-                    struct_by_sn,
-                    table_by_id,
+            for el in find_children(svc_el, "NEG-RESPONSE"):
+                rparams = []
+                for p_el in findall_descendants(el, "PARAM"):
+                    p = self._try_parse_param(
+                        p_el, "NEG_RESPONSE",
+                        f"{svc_short}.{get_text_local(el, 'SHORT-NAME')}",
+                        layer_short, svc_short,
+                        dop_by_id, dop_by_sn, dop_meta_by_id,
+                        struct_by_id, struct_by_sn, table_by_id
+                    )
+                    if p:
+                        rparams.append(p)
+                neg_responses.append(
+                    OdxMessage(
+                        id=get_attr(el, "ID"),
+                        shortName=get_text_local(el, "SHORT-NAME"),
+                        longName=get_text_local(el, "LONG-NAME"),
+                        params=rparams,
+                    )
                 )
-                if rp:
-                    rparams.append(rp)
 
-            self._annotate_service_name(rparams, svc_short)
-            pos_responses.append(
-                OdxMessage(
-                    id=get_attr(el, "ID"),
-                    shortName=rshort,
-                    longName=get_text_local(el, "LONG-NAME"),
-                    params=rparams,
-                )
+            logger.warning(
+                "[SERVICE CHECK] %s POS=%d NEG=%d",
+                svc_short, len(pos_responses), len(neg_responses)
             )
 
-
-        # ---------------- NEG RESPONSES ----------------
-        neg_responses: List[OdxMessage] = []
-
-        for rid in neg_ref_ids:
-            rr = neg_resp_map.get(rid)
-            if rr:
-                rr_copy = self._clone_message(rr)
-                prefix = f"{svc_short}.{rr_copy.shortName or 'NegResponse'}"
-                self._prefix_path(rr_copy.params, prefix)
-                self._annotate_service_name(rr_copy.params, svc_short)
-                neg_responses.append(rr_copy)
-
-        for el in inline_neg:
-            rshort = get_text_local(el, "SHORT-NAME") or f"{svc_short}_neg"
-            root_path = f"{svc_short}.{rshort}"
-            rparams: List[OdxParam] = []
-
-            for p_el in findall_descendants(el, "PARAM"):
-                rp = self._try_parse_param(
-                    p_el,
-                    "NEG_RESPONSE",
-                    root_path,
-                    layer_short,
-                    svc_short,
-                    dop_by_id,
-                    dop_by_sn,
-                    dop_meta_by_id,
-                    struct_by_id,
-                    struct_by_sn,
-                    table_by_id,
-                )
-                if rp:
-                    rparams.append(rp)
-
-            self._annotate_service_name(rparams, svc_short)
-            neg_responses.append(
-                OdxMessage(
-                    id=get_attr(el, "ID"),
-                    shortName=rshort,
-                    longName=get_text_local(el, "LONG-NAME"),
-                    params=rparams,
-                )
-            )
-
-        logger.warning(
-            "[SERVICE CHECK] %s POS=%d NEG=%d",
-            svc_short,
-            len(pos_responses),
-            len(neg_responses),
-        )
-        
-        
-        services.append(
+            services.append(
                 OdxService(
                     id=svc_attrs.get("ID", ""),
                     shortName=svc_short,
@@ -700,32 +558,17 @@ class ODXParser:
                 )
             )
 
-        parent_id = get_attr(find_child(layer_el, "PARENT-REF"), "ID-REF") or ""
-        linked_ids = self._collect_links(layer_el)
-        ni_sn, ni_ids = self._parse_not_inherited(layer_el)
-        layer = OdxLayer(
+        return OdxLayer(
             layerType=layerType,
-            id=get_attr(layer_el, "ID", ""),
+            id=get_attr(layer_el, "ID"),
             shortName=layer_short,
             longName=get_text_local(layer_el, "LONG-NAME"),
             description=get_text_local(layer_el, "DESC"),
-            parentId=parent_id,
-            rxId=get_text_local(layer_el, "RECEIVE-ID"),
-            txId=get_text_local(layer_el, "TRANSMIT-ID"),
             services=services,
-            units=units,
-            compuMethods=compu_methods,
-            dataObjectProps=list(dop_by_id.values()),
-            dtcs=dtcs,
             attrs=get_all_attrs(layer_el),
-            linkedLayerIds=linked_ids,
         )
-        if ni_sn:
-            layer.attrs["NI_DIAGCOMM_SN"] = "\n".join(sorted(ni_sn))
-        if ni_ids:
-            layer.attrs["NI_DIAGCOMM_ID"] = "\n".join(sorted(ni_ids))
-        return layer
-
+   
+    
     def _collect_links(self, layer_el: ET.Element) -> List[str]:
         links: List[str] = []
         links_el = find_child(layer_el, "DIAG-LAYER-LINKS")
