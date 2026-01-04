@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Tuple, Optional, Any
 
 from models import (
-    OdxParam, OdxMessage, OdxService, OdxLayer, OdxContainer, OdxDataObjectProp
+    OdxParam, OdxMessage, OdxService, OdxLayer, OdxContainer, OdxDatabase, OdxDataObjectProp
 )
 
 # --- XML helpers (namespace-agnostic) ---
