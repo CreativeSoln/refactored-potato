@@ -3,19 +3,23 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 import zipfile
 import io
+import logging
 from typing import Tuple
 
 from models import (
-    OdxParam,
-    OdxMessage,
-    OdxService,
-    OdxLayer,
     OdxContainer,
+    OdxLayer,
+    OdxService,
+    OdxMessage,
+    OdxParam,
 )
 
-# =========================================================
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.ERROR)
+
+# ---------------------------------------------------------
 # Helpers
-# =========================================================
+# ---------------------------------------------------------
 
 def local_name(tag: str) -> str:
     if "}" in tag:
@@ -23,82 +27,105 @@ def local_name(tag: str) -> str:
     return tag
 
 
-# =========================================================
+# ---------------------------------------------------------
 # Parser
-# =========================================================
+# ---------------------------------------------------------
 
 class ODXParser:
-    """
-    Minimal, UI-compatible ODX / PDX parser.
-    Structure preserved. UI contract preserved.
-    Debug prints added ONLY for diagnostics.
-    """
 
-    # -----------------------------------------------------
-    # PUBLIC API
-    # -----------------------------------------------------
+    # =====================================================
+    # PUBLIC API (USED BY UI – DO NOT CHANGE)
+    # =====================================================
     def parse_odx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
         zip_sig = b"PK\x03\x04"
 
+        # ---- Detect PDX (ZIP) anywhere in header ----
         if zip_sig in content[:1024]:
-            print("[PARSER] Detected PDX (ZIP)")
-            return self._parse_pdx_bytes(filename, content)
+            fname, container = self._parse_pdx_bytes(filename, content)
+        else:
+            root = self._try_parse_bytes(content)
+            root = self._ensure_container(root)
+            container = self._parse_container(root)
+            fname = filename
 
-        print("[PARSER] Detected plain ODX (XML)")
-        root = self._parse_xml_bytes(content)
-        container = self._parse_container(root)
-
-        print(
-            f"[PARSER] XML load: "
-            f"ECU={len(container.ecuVariants)}, "
-            f"BASE={len(container.baseVariants)}, "
-            f"PROTO={len(container.protocols)}"
+        # 🔴 ONE-LINE DEBUG COUNT (REQUESTED)
+        logger.error(
+            "[ODX-DEBUG] %s | ECU=%d BASE=%d PROTO=%d FG=%d",
+            fname,
+            len(container.ecuVariants),
+            len(container.baseVariants),
+            len(container.protocols),
+            len(container.functionalGroups),
         )
 
-        return filename, container
+        return fname, container
 
-    # -----------------------------------------------------
-    # XML parsing
-    # -----------------------------------------------------
-    def _parse_xml_bytes(self, content: bytes) -> ET.Element:
+    # =====================================================
+    # XML parsing helpers
+    # =====================================================
+    def _try_parse_bytes(self, raw: bytes) -> ET.Element:
+        # Try raw
         try:
-            return ET.fromstring(content)
+            return ET.fromstring(raw)
         except ET.ParseError:
-            text = content.decode("utf-8", errors="ignore")
-            idx = text.find("<")
-            return ET.fromstring(text[idx:].encode("utf-8"))
+            pass
 
-    def _text(self, el: ET.Element, name: str) -> str:
+        # Try decoding variants
+        for enc in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "cp1252", "latin-1"):
+            try:
+                text = raw.decode(enc, errors="strict")
+            except UnicodeDecodeError:
+                continue
+
+            idx = text.find("<")
+            if idx >= 0:
+                try:
+                    return ET.fromstring(text[idx:].encode("utf-8"))
+                except ET.ParseError:
+                    continue
+
+        raise ET.ParseError("Unable to parse XML content")
+
+    def _ensure_container(self, root: ET.Element) -> ET.Element:
+        # ODX root may be <ODX>, container is nested
+        if local_name(root.tag) == "DIAG-LAYER-CONTAINER":
+            return root
+
+        found = root.find(".//DIAG-LAYER-CONTAINER")
+        if found is not None:
+            return found
+
+        return root
+
+    def _text(self, el: ET.Element, tag: str) -> str:
         for c in el:
-            if local_name(c.tag) == name:
+            if local_name(c.tag) == tag:
                 return (c.text or "").strip()
         return ""
 
-    # -----------------------------------------------------
-    # PDX handling
-    # -----------------------------------------------------
+    # =====================================================
+    # PDX (ZIP) handling
+    # =====================================================
     def _parse_pdx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
         container = OdxContainer()
 
         zip_sig = b"PK\x03\x04"
         idx = content.find(zip_sig)
         if idx < 0:
-            print("[PARSER] ZIP signature not found — invalid PDX")
+            logger.error("[ODX-DEBUG] ZIP signature not found in %s", filename)
             return filename, container
 
         zip_bytes = content[idx:]
 
-        odx_count = 0
-
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-            for name in zf.namelist():
-                if not name.lower().endswith(".odx"):
-                    continue
+            odx_files = [n for n in zf.namelist() if n.lower().endswith(".odx")]
+            logger.error("[ODX-DEBUG] %s contains %d ODX files", filename, len(odx_files))
 
-                odx_count += 1
+            for name in odx_files:
                 try:
                     xml_bytes = zf.read(name)
-                    root = self._parse_xml_bytes(xml_bytes)
+                    root = self._try_parse_bytes(xml_bytes)
+                    root = self._ensure_container(root)
                     sub = self._parse_container(root)
 
                     container.ecuVariants.extend(sub.ecuVariants)
@@ -107,24 +134,14 @@ class ODXParser:
                     container.functionalGroups.extend(sub.functionalGroups)
                     container.ecuSharedData.extend(sub.ecuSharedData)
 
-                except Exception as e:
-                    print(f"[PARSER] Failed ODX: {name} ({e})")
-                    continue
-
-        print(
-            f"[PARSER] PDX summary: "
-            f"ODX files={odx_count}, "
-            f"ECU={len(container.ecuVariants)}, "
-            f"BASE={len(container.baseVariants)}, "
-            f"PROTO={len(container.protocols)}, "
-            f"FG={len(container.functionalGroups)}"
-        )
+                except Exception as ex:
+                    logger.error("[ODX-DEBUG] Failed parsing %s: %s", name, ex)
 
         return filename, container
 
-    # -----------------------------------------------------
+    # =====================================================
     # Container
-    # -----------------------------------------------------
+    # =====================================================
     def _parse_container(self, root: ET.Element) -> OdxContainer:
         cont = OdxContainer()
 
@@ -133,114 +150,93 @@ class ODXParser:
 
             if tag == "ECU-VARIANT":
                 cont.ecuVariants.append(self._parse_layer(el, "ECU-VARIANT"))
-
             elif tag == "BASE-VARIANT":
                 cont.baseVariants.append(self._parse_layer(el, "BASE-VARIANT"))
-
             elif tag == "PROTOCOL":
                 cont.protocols.append(self._parse_layer(el, "PROTOCOL"))
-
             elif tag == "FUNCTIONAL-GROUP":
                 cont.functionalGroups.append(self._parse_layer(el, "FUNCTIONAL-GROUP"))
-
             elif tag == "ECU-SHARED-DATA":
                 cont.ecuSharedData.append(self._parse_layer(el, "ECU-SHARED-DATA"))
 
         return cont
 
-    # -----------------------------------------------------
+    # =====================================================
     # Layer
-    # -----------------------------------------------------
-    def _parse_layer(self, layer_el: ET.Element, layer_type: str) -> OdxLayer:
+    # =====================================================
+    def _parse_layer(self, el: ET.Element, layer_type: str) -> OdxLayer:
         layer = OdxLayer(
             layerType=layer_type,
-            id=layer_el.get("ID", ""),
-            shortName=self._text(layer_el, "SHORT-NAME"),
-            longName=self._text(layer_el, "LONG-NAME"),
-            description=self._text(layer_el, "DESC"),
+            id=el.get("ID", ""),
+            shortName=self._text(el, "SHORT-NAME"),
+            longName=self._text(el, "LONG-NAME"),
+            description=self._text(el, "DESC"),
         )
 
-        svc_count = 0
-
-        for el in layer_el.iter():
-            if local_name(el.tag) == "DIAG-SERVICE":
-                layer.services.append(self._parse_service(el))
-                svc_count += 1
-
-        if svc_count:
-            print(f"[PARSER] Layer {layer.shortName} → services={svc_count}")
+        for s in el.iter():
+            if local_name(s.tag) == "DIAG-SERVICE":
+                layer.services.append(self._parse_service(s))
 
         return layer
 
-    # -----------------------------------------------------
+    # =====================================================
     # Service
-    # -----------------------------------------------------
-    def _parse_service(self, svc_el: ET.Element) -> OdxService:
+    # =====================================================
+    def _parse_service(self, el: ET.Element) -> OdxService:
         svc = OdxService(
-            id=svc_el.get("ID", ""),
-            shortName=self._text(svc_el, "SHORT-NAME"),
-            longName=self._text(svc_el, "LONG-NAME"),
-            description=self._text(svc_el, "DESC"),
-            semantic=svc_el.get("SEMANTIC", ""),
+            id=el.get("ID", ""),
+            shortName=self._text(el, "SHORT-NAME"),
+            longName=self._text(el, "LONG-NAME"),
+            description=self._text(el, "DESC"),
+            semantic=el.get("SEMANTIC", ""),
         )
 
-        for el in svc_el:
-            tag = local_name(el.tag)
-
+        for c in el:
+            tag = local_name(c.tag)
             if tag == "REQUEST":
-                svc.request = self._parse_message(el)
-
+                svc.request = self._parse_message(c)
             elif tag == "POS-RESPONSE":
-                svc.posResponses.append(self._parse_message(el))
-
+                svc.posResponses.append(self._parse_message(c))
             elif tag == "NEG-RESPONSE":
-                svc.negResponses.append(self._parse_message(el))
+                svc.negResponses.append(self._parse_message(c))
 
         return svc
 
-    # -----------------------------------------------------
+    # =====================================================
     # Message
-    # -----------------------------------------------------
-    def _parse_message(self, msg_el: ET.Element) -> OdxMessage:
+    # =====================================================
+    def _parse_message(self, el: ET.Element) -> OdxMessage:
         msg = OdxMessage(
-            id=msg_el.get("ID", ""),
-            shortName=self._text(msg_el, "SHORT-NAME"),
-            longName=self._text(msg_el, "LONG-NAME"),
+            id=el.get("ID", ""),
+            shortName=self._text(el, "SHORT-NAME"),
+            longName=self._text(el, "LONG-NAME"),
         )
 
-        pcount = 0
-
-        for el in msg_el.iter():
-            if local_name(el.tag) == "PARAM":
-                msg.params.append(self._parse_param(el))
-                pcount += 1
-
-        if pcount:
-            print(f"[PARSER] Message {msg.shortName} → params={pcount}")
+        for p in el.iter():
+            if local_name(p.tag) == "PARAM":
+                msg.params.append(self._parse_param(p))
 
         return msg
 
-    # -----------------------------------------------------
+    # =====================================================
     # Param
-    # -----------------------------------------------------
-    def _parse_param(self, p_el: ET.Element) -> OdxParam:
+    # =====================================================
+    def _parse_param(self, el: ET.Element) -> OdxParam:
         p = OdxParam(
-            shortName=self._text(p_el, "SHORT-NAME"),
-            longName=self._text(p_el, "LONG-NAME"),
-            description=self._text(p_el, "DESC"),
-            semantic=self._text(p_el, "SEMANTIC"),
-            bytePosition=self._text(p_el, "BYTE-POSITION"),
-            bitLength=self._text(p_el, "BIT-LENGTH"),
+            shortName=self._text(el, "SHORT-NAME"),
+            longName=self._text(el, "LONG-NAME"),
+            description=self._text(el, "DESC"),
+            semantic=self._text(el, "SEMANTIC"),
+            bytePosition=self._text(el, "BYTE-POSITION"),
+            bitLength=self._text(el, "BIT-LENGTH"),
         )
 
-        for el in p_el:
-            tag = local_name(el.tag)
-
+        for c in el:
+            tag = local_name(c.tag)
             if tag == "CODED-CONST":
-                p.codedConstValue = self._text(el, "CODED-VALUE")
-
+                p.codedConstValue = self._text(c, "CODED-VALUE")
             elif tag == "PHYS-CONST":
-                p.physConstValue = self._text(el, "V")
+                p.physConstValue = self._text(c, "V")
 
         p.children = []
         return p
