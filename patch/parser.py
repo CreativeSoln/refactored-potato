@@ -422,7 +422,12 @@ class ODXParser:
             rshort = get_text_local(req, "SHORT-NAME")
             root_path = rshort or ""
             rparams: List[OdxParam] = []
-            for p_el in findall_descendants(req, "PARAM"):
+            
+            param_blocks = (
+                    find_children(res, "PARAM")
+                    or findall_descendants(res, "PARAM")
+                )
+            for p_el in param_blocks:
                 rp = self._try_parse_param(
                     p_el,
                     "REQUEST",
