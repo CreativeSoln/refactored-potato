@@ -1,36 +1,32 @@
-def _normalize_did_hex(self, value) -> Optional[str]:
-    """
-    Normalize any DID representation to canonical 16-bit hex format: 0xXXXX.
+def _display_dual(self, val: Optional[str]) -> str:
+    if val is None:
+        return ""
 
-    Accepts:
-      - int (decimal or hex literal)
-      - '4DF', '0x4DF'
-      - 'F190', '0xF1 90'
-      - 'f1 90'
-    Returns:
-      - '0x04DF', '0xF190', etc.
-      - None if value cannot be interpreted
-    """
-    if value is None:
+    kind = self._classify_numeric_string(str(val
+                                            
+    if kind not in ('hex', 'bytes'):
+        return str(val)
+
+    s_hex = self._display_hex(val)
+    dec = self._parse_int_value(val)
+    return f"{s_hex} ({dec})" if dec is not None else s_hex
+
+def _display_hex(self, val: Optional[str]) -> Optional[str]:
+    if val is None:
         return None
 
-    try:
-        # Integer input (decimal or hex literal)
-        if isinstance(value, int):
-            return f"0x{value & 0xFFFF:04X}"
-
-        s = str(value).strip().lower()
-        if not s:
-            return None
-
-        # Remove prefix and spaces
-        if s.startswith("0x"):
-            s = s[2:]
-        s = s.replace(" ", "")
-
-        # Parse hex
-        val = int(s, 16)
-        return f"0x{val & 0xFFFF:04X}"
-
-    except Exception:
+    s = str(val).strip()
+    if not s:
         return None
+
+    kind = self._classify_numeric_string(s)
+
+    # ✅ Only display hex if the source itself is hex / bytes
+    if kind in ('bytes', 'hex'):
+        hb = self._hex_bytes_from_string(s)
+        if hb:
+            return '0x' + ''.join(f"{b:02X}" for b in hb)
+        return s
+
+    # ❌ DO NOT convert decimal to hex
+    return s
