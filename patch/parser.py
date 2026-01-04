@@ -462,7 +462,7 @@ class ODXParser:
                     or findall_descendants(res, "PARAM")
                 )
             
-            for p_el in find_children(res, "PARAM"):
+            for p_el in param_blocks:
                 rp = self._try_parse_param(
                     p_el,
                     "POS_RESPONSE",
@@ -491,6 +491,9 @@ class ODXParser:
             rshort = get_text_local(res, "SHORT-NAME")
             root_path = rshort or ""
             rparams: List[OdxParam] = []
+
+                    find_children(res, "PARAM")
+            
             for p_el in findall_descendants(res, "PARAM"):
                 rp = self._try_parse_param(
                     p_el,
