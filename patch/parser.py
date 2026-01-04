@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Tuple, List
+from typing import Tuple
 
 from models import (
     OdxParam,
@@ -13,63 +13,67 @@ from models import (
 
 
 # =========================================================
+# Helper (namespace-safe)
+# =========================================================
+
+def local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+# =========================================================
 # Parser
 # =========================================================
 
 class ODXParser:
     """
-    Conservative ODX parser.
-    This file only guarantees structural correctness for the UI.
-    No semantic decoding is attempted here.
+    Minimal, namespace-safe parser.
+    Structure preserved. UI contract preserved.
     """
 
-    # -----------------------------------------------------
-    # Public API (UI depends on this)
-    # -----------------------------------------------------
-
+    # -----------------------------
+    # PUBLIC API (DO NOT RENAME)
+    # -----------------------------
     def parse_odx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
         root = self._parse_xml_bytes(content)
         container = self._parse_container(root)
         return filename, container
 
-    # -----------------------------------------------------
-    # XML helpers
-    # -----------------------------------------------------
-
+    # -----------------------------
+    # XML
+    # -----------------------------
     def _parse_xml_bytes(self, content: bytes) -> ET.Element:
         try:
             return ET.fromstring(content)
         except ET.ParseError:
-            # tolerate BOM / garbage before XML
             text = content.decode("utf-8", errors="ignore")
             start = text.find("<")
-            if start >= 0:
-                return ET.fromstring(text[start:].encode("utf-8"))
-            raise
+            return ET.fromstring(text[start:].encode("utf-8"))
 
-    def _text(self, el: ET.Element, tag: str) -> str:
-        t = el.findtext(tag)
-        return t.strip() if t else ""
+    def _text(self, el: ET.Element, name: str) -> str:
+        for c in el:
+            if local_name(c.tag) == name:
+                return (c.text or "").strip()
+        return ""
 
-    # -----------------------------------------------------
+    # -----------------------------
     # Container
-    # -----------------------------------------------------
-
+    # -----------------------------
     def _parse_container(self, root: ET.Element) -> OdxContainer:
         cont = OdxContainer()
 
-        for ev in root.iter("ECU-VARIANT"):
-            cont.ecuVariants.append(self._parse_layer(ev, "ECU-VARIANT"))
-
-        for bv in root.iter("BASE-VARIANT"):
-            cont.baseVariants.append(self._parse_layer(bv, "BASE-VARIANT"))
+        for el in root.iter():
+            if local_name(el.tag) == "ECU-VARIANT":
+                cont.ecuVariants.append(self._parse_layer(el, "ECU-VARIANT"))
+            elif local_name(el.tag) == "BASE-VARIANT":
+                cont.baseVariants.append(self._parse_layer(el, "BASE-VARIANT"))
 
         return cont
 
-    # -----------------------------------------------------
+    # -----------------------------
     # Layer
-    # -----------------------------------------------------
-
+    # -----------------------------
     def _parse_layer(self, layer_el: ET.Element, layer_type: str) -> OdxLayer:
         layer = OdxLayer(
             layerType=layer_type,
@@ -79,15 +83,15 @@ class ODXParser:
             description=self._text(layer_el, "DESC"),
         )
 
-        for svc_el in layer_el.iter("DIAG-SERVICE"):
-            layer.services.append(self._parse_service(svc_el))
+        for el in layer_el.iter():
+            if local_name(el.tag) == "DIAG-SERVICE":
+                layer.services.append(self._parse_service(el))
 
         return layer
 
-    # -----------------------------------------------------
+    # -----------------------------
     # Service
-    # -----------------------------------------------------
-
+    # -----------------------------
     def _parse_service(self, svc_el: ET.Element) -> OdxService:
         svc = OdxService(
             id=svc_el.get("ID", ""),
@@ -97,25 +101,23 @@ class ODXParser:
             semantic=svc_el.get("SEMANTIC", ""),
         )
 
-        # REQUEST
-        req_el = svc_el.find("REQUEST")
-        if req_el is not None:
-            svc.request = self._parse_message(req_el)
+        for el in svc_el:
+            tag = local_name(el.tag)
 
-        # POS RESPONSES
-        for pr in svc_el.findall("POS-RESPONSE"):
-            svc.posResponses.append(self._parse_message(pr))
+            if tag == "REQUEST":
+                svc.request = self._parse_message(el)
 
-        # NEG RESPONSES
-        for nr in svc_el.findall("NEG-RESPONSE"):
-            svc.negResponses.append(self._parse_message(nr))
+            elif tag == "POS-RESPONSE":
+                svc.posResponses.append(self._parse_message(el))
+
+            elif tag == "NEG-RESPONSE":
+                svc.negResponses.append(self._parse_message(el))
 
         return svc
 
-    # -----------------------------------------------------
+    # -----------------------------
     # Message
-    # -----------------------------------------------------
-
+    # -----------------------------
     def _parse_message(self, msg_el: ET.Element) -> OdxMessage:
         msg = OdxMessage(
             id=msg_el.get("ID", ""),
@@ -123,15 +125,15 @@ class ODXParser:
             longName=self._text(msg_el, "LONG-NAME"),
         )
 
-        for p_el in msg_el.findall(".//PARAM"):
-            msg.params.append(self._parse_param(p_el))
+        for el in msg_el.iter():
+            if local_name(el.tag) == "PARAM":
+                msg.params.append(self._parse_param(el))
 
         return msg
 
-    # -----------------------------------------------------
+    # -----------------------------
     # Param
-    # -----------------------------------------------------
-
+    # -----------------------------
     def _parse_param(self, p_el: ET.Element) -> OdxParam:
         p = OdxParam(
             shortName=self._text(p_el, "SHORT-NAME"),
@@ -142,16 +144,16 @@ class ODXParser:
             bitLength=self._text(p_el, "BIT-LENGTH"),
         )
 
-        # Constants (safe, optional)
-        coded = p_el.find("CODED-CONST")
-        if coded is not None:
-            p.codedConstValue = self._text(coded, "CODED-VALUE")
+        for el in p_el:
+            tag = local_name(el.tag)
 
-        phys = p_el.find("PHYS-CONST")
-        if phys is not None:
-            p.physConstValue = self._text(phys, "V")
+            if tag == "CODED-CONST":
+                p.codedConstValue = self._text(el, "CODED-VALUE")
 
-        # Children (STRUCTURE support placeholder)
+            elif tag == "PHYS-CONST":
+                p.physConstValue = self._text(el, "V")
+
+        # children always exists (UI relies on this)
         p.children = []
 
         return p
