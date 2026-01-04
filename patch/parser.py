@@ -170,6 +170,15 @@ class ODXParser:
     def __init__(self) -> None:
         self._fmt = FormatterService()
 
+    def _clone_message(self, src: OdxMessage) -> OdxMessage:
+        return OdxMessage(
+            id=src.id,
+            shortName=src.shortName,
+            longName=src.longName,
+            params=list(src.params or []),
+        )
+
+    
     # XML root parser
     def parse_xml_bytes(self, content: bytes) -> ET.Element:
         return _try_parse_bytes(content)
@@ -578,11 +587,13 @@ class ODXParser:
             for rid in pos_ref_ids:
                 rr = pos_resp_map.get(rid)
                 if rr:
-                    prefix = f"{svc_short}.{rr.shortName or 'PosResponse'}" if svc_short else (rr.shortName or "")
-                    self._prefix_path(rr.params, prefix)
-                    self._annotate_service_name(rr.params, svc_short)
-                    pos_responses.append(rr)
+                    rr_copy = self._clone_message(rr)
+                    prefix = f"{svc_short}.{rr_copy.shortName or 'PosResponse'}" if svc_short else (rr_copy.shortName or "")
+                    self._prefix_path(rr_copy.params, prefix)
+                    self._annotate_service_name(rr_copy.params, svc_short)
+                    pos_responses.append(rr_copy)
                     attached_pos_ids.add(rid)
+
             for el in inline_pos:
                 rshort = get_text_local(el, "SHORT-NAME") or (svc_short + "_pos")
                 root_path = svc_short if svc_short else ""
@@ -619,11 +630,13 @@ class ODXParser:
             for rid in neg_ref_ids:
                 rr = neg_resp_map.get(rid)
                 if rr:
-                    prefix = f"{svc_short}.{rr.shortName or 'NegResponse'}" if svc_short else (rr.shortName or "")
-                    self._prefix_path(rr.params, prefix)
-                    self._annotate_service_name(rr.params, svc_short)
-                    neg_responses.append(rr)
+                    rr_copy = self._clone_message(rr)
+                    prefix = f"{svc_short}.{rr_copy.shortName or 'NegResponse'}" if svc_short else (rr_copy.shortName or "")
+                    self._prefix_path(rr_copy.params, prefix)
+                    self._annotate_service_name(rr_copy.params, svc_short)
+                    neg_responses.append(rr_copy)
                     attached_neg_ids.add(rid)
+
             for el in inline_neg:
                 rshort = get_text_local(el, "SHORT-NAME") or (svc_short + "_neg")
                 root_path = svc_short if svc_short else ""
