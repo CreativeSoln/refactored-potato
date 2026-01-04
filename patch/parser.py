@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+import zipfile
+import io
 from typing import Tuple
 
 from models import (
@@ -11,12 +13,12 @@ from models import (
     OdxContainer,
 )
 
-
 # =========================================================
-# Helper (namespace-safe)
+# Helpers
 # =========================================================
 
 def local_name(tag: str) -> str:
+    """Strip XML namespace"""
     if "}" in tag:
         return tag.split("}", 1)[1]
     return tag
@@ -28,28 +30,35 @@ def local_name(tag: str) -> str:
 
 class ODXParser:
     """
-    Minimal, namespace-safe parser.
+    Minimal, UI-compatible ODX / PDX parser.
     Structure preserved. UI contract preserved.
     """
 
-    # -----------------------------
-    # PUBLIC API (DO NOT RENAME)
-    # -----------------------------
+    # -----------------------------------------------------
+    # PUBLIC API (UI DEPENDS ON THIS)
+    # -----------------------------------------------------
     def parse_odx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
+        # ---- PDX (ZIP) ----
+        if content[:2] == b"PK":
+            return self._parse_pdx_bytes(filename, content)
+
+        # ---- Plain ODX XML ----
         root = self._parse_xml_bytes(content)
         container = self._parse_container(root)
         return filename, container
 
-    # -----------------------------
-    # XML
-    # -----------------------------
+    # -----------------------------------------------------
+    # XML parsing
+    # -----------------------------------------------------
     def _parse_xml_bytes(self, content: bytes) -> ET.Element:
         try:
             return ET.fromstring(content)
         except ET.ParseError:
             text = content.decode("utf-8", errors="ignore")
-            start = text.find("<")
-            return ET.fromstring(text[start:].encode("utf-8"))
+            idx = text.find("<")
+            if idx >= 0:
+                return ET.fromstring(text[idx:].encode("utf-8"))
+            raise
 
     def _text(self, el: ET.Element, name: str) -> str:
         for c in el:
@@ -57,23 +66,63 @@ class ODXParser:
                 return (c.text or "").strip()
         return ""
 
-    # -----------------------------
+    # -----------------------------------------------------
+    # PDX handling (ZIP)
+    # -----------------------------------------------------
+    def _parse_pdx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
+        container = OdxContainer()
+
+        with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
+            for name in zf.namelist():
+                if not name.lower().endswith(".odx"):
+                    continue
+
+                try:
+                    xml_bytes = zf.read(name)
+                    root = self._parse_xml_bytes(xml_bytes)
+                    sub = self._parse_container(root)
+
+                    container.ecuVariants.extend(sub.ecuVariants)
+                    container.baseVariants.extend(sub.baseVariants)
+                    container.protocols.extend(sub.protocols)
+                    container.functionalGroups.extend(sub.functionalGroups)
+                    container.ecuSharedData.extend(sub.ecuSharedData)
+
+                except Exception:
+                    # Ignore broken ODX entries, continue safely
+                    continue
+
+        return filename, container
+
+    # -----------------------------------------------------
     # Container
-    # -----------------------------
+    # -----------------------------------------------------
     def _parse_container(self, root: ET.Element) -> OdxContainer:
         cont = OdxContainer()
 
         for el in root.iter():
-            if local_name(el.tag) == "ECU-VARIANT":
+            tag = local_name(el.tag)
+
+            if tag == "ECU-VARIANT":
                 cont.ecuVariants.append(self._parse_layer(el, "ECU-VARIANT"))
-            elif local_name(el.tag) == "BASE-VARIANT":
+
+            elif tag == "BASE-VARIANT":
                 cont.baseVariants.append(self._parse_layer(el, "BASE-VARIANT"))
+
+            elif tag == "PROTOCOL":
+                cont.protocols.append(self._parse_layer(el, "PROTOCOL"))
+
+            elif tag == "FUNCTIONAL-GROUP":
+                cont.functionalGroups.append(self._parse_layer(el, "FUNCTIONAL-GROUP"))
+
+            elif tag == "ECU-SHARED-DATA":
+                cont.ecuSharedData.append(self._parse_layer(el, "ECU-SHARED-DATA"))
 
         return cont
 
-    # -----------------------------
+    # -----------------------------------------------------
     # Layer
-    # -----------------------------
+    # -----------------------------------------------------
     def _parse_layer(self, layer_el: ET.Element, layer_type: str) -> OdxLayer:
         layer = OdxLayer(
             layerType=layer_type,
@@ -89,9 +138,9 @@ class ODXParser:
 
         return layer
 
-    # -----------------------------
+    # -----------------------------------------------------
     # Service
-    # -----------------------------
+    # -----------------------------------------------------
     def _parse_service(self, svc_el: ET.Element) -> OdxService:
         svc = OdxService(
             id=svc_el.get("ID", ""),
@@ -115,9 +164,9 @@ class ODXParser:
 
         return svc
 
-    # -----------------------------
+    # -----------------------------------------------------
     # Message
-    # -----------------------------
+    # -----------------------------------------------------
     def _parse_message(self, msg_el: ET.Element) -> OdxMessage:
         msg = OdxMessage(
             id=msg_el.get("ID", ""),
@@ -131,9 +180,9 @@ class ODXParser:
 
         return msg
 
-    # -----------------------------
+    # -----------------------------------------------------
     # Param
-    # -----------------------------
+    # -----------------------------------------------------
     def _parse_param(self, p_el: ET.Element) -> OdxParam:
         p = OdxParam(
             shortName=self._text(p_el, "SHORT-NAME"),
@@ -153,7 +202,7 @@ class ODXParser:
             elif tag == "PHYS-CONST":
                 p.physConstValue = self._text(el, "V")
 
-        # children always exists (UI relies on this)
+        # Always initialize children (UI depends on this)
         p.children = []
 
         return p
