@@ -23,11 +23,14 @@ from PyQt6.QtWidgets import (
 from parser import ODXParser
 from models import OdxService, OdxParam, OdxDatabase, OdxLayer
 
-
 def _is_odx(name: str) -> bool:
     n = name.lower()
-    # Accept .odx, .odx-C/D suffixes, and plain .xml
-    return bool(re.search(r"\.odx(?:\-[a-z]+)?$", n)) or n.endswith(".xml")
+    return (
+        n.endswith(".odx")
+        or re.search(r"\.odx-[a-z]+$", n) is not None
+        or n.endswith(".odx.xml")
+        or n.endswith(".xml")
+    )
 
 
 class MainWindow(QMainWindow):
@@ -213,7 +216,7 @@ class MainWindow(QMainWindow):
                 continue
 
         if not containers:
-            self.sb.showMessage("No valid ODX parsed")
+            assert containers, "PDX opened, but ZERO ODX / ODX-C / ODX-D / XML files were accepted"
             return
 
         # Merge parsed containers → database
@@ -294,6 +297,7 @@ class MainWindow(QMainWindow):
         variants: List[OdxLayer] = []
         variants.extend(getattr(self.database, "ecuVariants", []) or [])
         variants.extend(getattr(self.database, "baseVariants", []) or [])
+        
 
         # 2) Initialize filter combos (once)
         if initial_build:
