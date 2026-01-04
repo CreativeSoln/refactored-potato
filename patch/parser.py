@@ -424,8 +424,8 @@ class ODXParser:
             rparams: List[OdxParam] = []
             
             param_blocks = (
-                    find_children(res, "PARAM")
-                    or findall_descendants(res, "PARAM")
+                    find_children(req, "PARAM")
+                    or findall_descendants(req, "PARAM")
                 )
             for p_el in param_blocks:
                 rp = self._try_parse_param(
@@ -478,20 +478,13 @@ class ODXParser:
                 )
                 if rp is not None:
                     rparams.append(rp)
-                    logger.info(
-                        "[Parser] Service=%s POS_RESP=%d NEG_RESP=%d",
-                        svc_short,
-                        sum(len(r.params) for r in pos_responses),
-                        sum(len(r.params) for r in neg_responses
-            pos_resp_map[rid] = OdxMessage(
+                pos_resp_map[rid] = OdxMessage(
                 id=rid,
                 shortName=rshort,
                 longName=get_text_local(res, "LONG-NAME"),
                 params=rparams,
             )
-            ),
-                )
-
+            
 
         # Standalone NEG-RESPONSE
         for res in findall_descendants(layer_el, "NEG-RESPONSE"):
@@ -500,9 +493,13 @@ class ODXParser:
             root_path = rshort or ""
             rparams: List[OdxParam] = []
 
+            param_blocks = (
                     find_children(res, "PARAM")
-            
-            for p_el in findall_descendants(res, "PARAM"):
+                    or findall_descendants(res, "PARAM")
+                )
+
+
+            for p_el in param_blocks:
                 rp = self._try_parse_param(
                     p_el,
                     "NEG_RESPONSE",
