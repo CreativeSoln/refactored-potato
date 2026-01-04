@@ -420,6 +420,10 @@ class ODXParser:
             self._parse_dtc(d) for d in findall_descendants(layer_el, "DTC")
         ]
 
+        def _all_pos_responses():
+            return list(pos_resp_map.values())
+
+
         # Message maps
         request_map: Dict[str, OdxMessage] = {}
         pos_resp_map: Dict[str, OdxMessage] = {}
@@ -583,16 +587,25 @@ class ODXParser:
                 )
 
             # POS RESPONSES
-            pos_responses: List[OdxMessage] = []
-            for rid in pos_ref_ids:
-                rr = pos_resp_map.get(rid)
-                if rr:
-                    rr_copy = self._clone_message(rr)
-                    prefix = f"{svc_short}.{rr_copy.shortName or 'PosResponse'}" if svc_short else (rr_copy.shortName or "")
-                    self._prefix_path(rr_copy.params, prefix)
-                    self._annotate_service_name(rr_copy.params, svc_short)
-                    pos_responses.append(rr_copy)
-                    attached_pos_ids.add(rid)
+        pos_responses: List[OdxMessage] = []
+
+        # 1) Attach referenced POS-RESPONSES
+        for rid in pos_ref_ids:
+            rr = pos_resp_map.get(rid)
+            if rr:
+                prefix = f"{svc_short}.{rr.shortName or 'PosResponse'}"
+                self._prefix_path(rr.params, prefix)
+                self._annotate_service_name(rr.params, svc_short)
+                pos_responses.append(rr)
+
+        # 2) FALLBACK: attach standalone POS-RESPONSES if refs are missing
+        if not pos_responses:
+            for rr in pos_resp_map.values():
+                prefix = f"{svc_short}.{rr.shortName or 'PosResponse'}"
+                self._prefix_path(rr.params, prefix)
+                self._annotate_service_name(rr.params, svc_short)
+                pos_responses.append(rr)
+
 
             for el in inline_pos:
                 rshort = get_text_local(el, "SHORT-NAME") or (svc_short + "_pos")
