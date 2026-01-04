@@ -478,12 +478,20 @@ class ODXParser:
                 )
                 if rp is not None:
                     rparams.append(rp)
+                    logger.info(
+                        "[Parser] Service=%s POS_RESP=%d NEG_RESP=%d",
+                        svc_short,
+                        sum(len(r.params) for r in pos_responses),
+                        sum(len(r.params) for r in neg_responses
             pos_resp_map[rid] = OdxMessage(
                 id=rid,
                 shortName=rshort,
                 longName=get_text_local(res, "LONG-NAME"),
                 params=rparams,
             )
+            ),
+                )
+
 
         # Standalone NEG-RESPONSE
         for res in findall_descendants(layer_el, "NEG-RESPONSE"):
