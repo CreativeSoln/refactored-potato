@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-import zipfile
-import io
-import logging
+import re
 from typing import Tuple
 
 from models import (
@@ -14,17 +12,47 @@ from models import (
     OdxParam,
 )
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.ERROR)
-
 # ---------------------------------------------------------
-# Helpers
+# Low-level XML recovery helpers (AS IN YOUR SCREENSHOT)
 # ---------------------------------------------------------
 
-def local_name(tag: str) -> str:
-    if "}" in tag:
-        return tag.split("}", 1)[1]
-    return tag
+def _slice_from_first_lt(raw: bytes) -> bytes:
+    i = raw.find(b"<")
+    return raw if i <= 0 else raw[i:]
+
+
+def _try_parse_bytes(raw: bytes) -> ET.Element:
+    raw1 = _slice_from_first_lt(raw)
+
+    try:
+        return ET.fromstring(raw1)
+    except ET.ParseError:
+        pass
+
+    for enc in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "cp1252", "latin-1"):
+        try:
+            text = raw1.decode(enc, errors="strict")
+        except UnicodeDecodeError:
+            continue
+
+        if "<" in text and ">" in text:
+            m = re.search(r"<", text)
+            if m:
+                text = text[m.start():]
+            try:
+                return ET.fromstring(text.encode("utf-8"))
+            except ET.ParseError:
+                continue
+
+    text = raw1.decode("utf-8", errors="ignore")
+    m = re.search(r"<", text)
+    if m:
+        text = text[m.start():]
+    return ET.fromstring(text.encode("utf-8"))
+
+
+def _local(tag: str) -> str:
+    return tag.split("}", 1)[-1]
 
 
 # ---------------------------------------------------------
@@ -32,121 +60,33 @@ def local_name(tag: str) -> str:
 # ---------------------------------------------------------
 
 class ODXParser:
+    """
+    Parser is BYTES-only.
+    ZIP / PDX handling is done by UI (as in your loader).
+    """
 
-    # =====================================================
-    # PUBLIC API (USED BY UI – DO NOT CHANGE)
-    # =====================================================
-    def parse_odx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
-        zip_sig = b"PK\x03\x04"
+    # -------- entry points --------
 
-        # ---- Detect PDX (ZIP) anywhere in header ----
-        if zip_sig in content[:1024]:
-            fname, container = self._parse_pdx_bytes(filename, content)
-        else:
-            root = self._try_parse_bytes(content)
-            root = self._ensure_container(root)
-            container = self._parse_container(root)
-            fname = filename
+    def parse_xml_bytes(self, raw: bytes) -> ET.Element:
+        return _try_parse_bytes(raw)
 
-        # 🔴 ONE-LINE DEBUG COUNT (REQUESTED)
-        logger.error(
-            "[ODX-DEBUG] %s | ECU=%d BASE=%d PROTO=%d FG=%d",
-            fname,
-            len(container.ecuVariants),
-            len(container.baseVariants),
-            len(container.protocols),
-            len(container.functionalGroups),
-        )
+    def parse_odx_bytes(self, filename: str, raw: bytes) -> Tuple[str, OdxContainer]:
+        root = self.parse_xml_bytes(raw)
+        return filename, self.parse_container(root)
 
-        return fname, container
+    # -------- container --------
 
-    # =====================================================
-    # XML parsing helpers
-    # =====================================================
-    def _try_parse_bytes(self, raw: bytes) -> ET.Element:
-        # Try raw
-        try:
-            return ET.fromstring(raw)
-        except ET.ParseError:
-            pass
-
-        # Try decoding variants
-        for enc in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "cp1252", "latin-1"):
-            try:
-                text = raw.decode(enc, errors="strict")
-            except UnicodeDecodeError:
-                continue
-
-            idx = text.find("<")
-            if idx >= 0:
-                try:
-                    return ET.fromstring(text[idx:].encode("utf-8"))
-                except ET.ParseError:
-                    continue
-
-        raise ET.ParseError("Unable to parse XML content")
-
-    def _ensure_container(self, root: ET.Element) -> ET.Element:
-        # ODX root may be <ODX>, container is nested
-        if local_name(root.tag) == "DIAG-LAYER-CONTAINER":
-            return root
-
-        found = root.find(".//DIAG-LAYER-CONTAINER")
-        if found is not None:
-            return found
-
-        return root
-
-    def _text(self, el: ET.Element, tag: str) -> str:
-        for c in el:
-            if local_name(c.tag) == tag:
-                return (c.text or "").strip()
-        return ""
-
-    # =====================================================
-    # PDX (ZIP) handling
-    # =====================================================
-    def _parse_pdx_bytes(self, filename: str, content: bytes) -> Tuple[str, OdxContainer]:
-        container = OdxContainer()
-
-        zip_sig = b"PK\x03\x04"
-        idx = content.find(zip_sig)
-        if idx < 0:
-            logger.error("[ODX-DEBUG] ZIP signature not found in %s", filename)
-            return filename, container
-
-        zip_bytes = content[idx:]
-
-        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-            odx_files = [n for n in zf.namelist() if n.lower().endswith(".odx")]
-            logger.error("[ODX-DEBUG] %s contains %d ODX files", filename, len(odx_files))
-
-            for name in odx_files:
-                try:
-                    xml_bytes = zf.read(name)
-                    root = self._try_parse_bytes(xml_bytes)
-                    root = self._ensure_container(root)
-                    sub = self._parse_container(root)
-
-                    container.ecuVariants.extend(sub.ecuVariants)
-                    container.baseVariants.extend(sub.baseVariants)
-                    container.protocols.extend(sub.protocols)
-                    container.functionalGroups.extend(sub.functionalGroups)
-                    container.ecuSharedData.extend(sub.ecuSharedData)
-
-                except Exception as ex:
-                    logger.error("[ODX-DEBUG] Failed parsing %s: %s", name, ex)
-
-        return filename, container
-
-    # =====================================================
-    # Container
-    # =====================================================
-    def _parse_container(self, root: ET.Element) -> OdxContainer:
+    def parse_container(self, root: ET.Element) -> OdxContainer:
         cont = OdxContainer()
 
+        # ODX root → DIAG-LAYER-CONTAINER may be nested
+        if _local(root.tag) != "DIAG-LAYER-CONTAINER":
+            found = root.find(".//DIAG-LAYER-CONTAINER")
+            if found is not None:
+                root = found
+
         for el in root.iter():
-            tag = local_name(el.tag)
+            tag = _local(el.tag)
 
             if tag == "ECU-VARIANT":
                 cont.ecuVariants.append(self._parse_layer(el, "ECU-VARIANT"))
@@ -161,9 +101,8 @@ class ODXParser:
 
         return cont
 
-    # =====================================================
-    # Layer
-    # =====================================================
+    # -------- layer --------
+
     def _parse_layer(self, el: ET.Element, layer_type: str) -> OdxLayer:
         layer = OdxLayer(
             layerType=layer_type,
@@ -174,14 +113,13 @@ class ODXParser:
         )
 
         for s in el.iter():
-            if local_name(s.tag) == "DIAG-SERVICE":
+            if _local(s.tag) == "DIAG-SERVICE":
                 layer.services.append(self._parse_service(s))
 
         return layer
 
-    # =====================================================
-    # Service
-    # =====================================================
+    # -------- service --------
+
     def _parse_service(self, el: ET.Element) -> OdxService:
         svc = OdxService(
             id=el.get("ID", ""),
@@ -192,19 +130,18 @@ class ODXParser:
         )
 
         for c in el:
-            tag = local_name(c.tag)
-            if tag == "REQUEST":
+            t = _local(c.tag)
+            if t == "REQUEST":
                 svc.request = self._parse_message(c)
-            elif tag == "POS-RESPONSE":
+            elif t == "POS-RESPONSE":
                 svc.posResponses.append(self._parse_message(c))
-            elif tag == "NEG-RESPONSE":
+            elif t == "NEG-RESPONSE":
                 svc.negResponses.append(self._parse_message(c))
 
         return svc
 
-    # =====================================================
-    # Message
-    # =====================================================
+    # -------- message --------
+
     def _parse_message(self, el: ET.Element) -> OdxMessage:
         msg = OdxMessage(
             id=el.get("ID", ""),
@@ -213,14 +150,13 @@ class ODXParser:
         )
 
         for p in el.iter():
-            if local_name(p.tag) == "PARAM":
+            if _local(p.tag) == "PARAM":
                 msg.params.append(self._parse_param(p))
 
         return msg
 
-    # =====================================================
-    # Param
-    # =====================================================
+    # -------- param --------
+
     def _parse_param(self, el: ET.Element) -> OdxParam:
         p = OdxParam(
             shortName=self._text(el, "SHORT-NAME"),
@@ -232,11 +168,19 @@ class ODXParser:
         )
 
         for c in el:
-            tag = local_name(c.tag)
-            if tag == "CODED-CONST":
+            t = _local(c.tag)
+            if t == "CODED-CONST":
                 p.codedConstValue = self._text(c, "CODED-VALUE")
-            elif tag == "PHYS-CONST":
+            elif t == "PHYS-CONST":
                 p.physConstValue = self._text(c, "V")
 
         p.children = []
         return p
+
+    # -------- util --------
+
+    def _text(self, el: ET.Element, tag: str) -> str:
+        for c in el:
+            if _local(c.tag) == tag:
+                return (c.text or "").strip()
+        return ""
