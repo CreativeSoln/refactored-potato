@@ -1,39 +1,216 @@
-def add_param_recursive(parent_item: QTreeWidgetItem, p: OdxParam) -> bool:
-    nonlocal param_count_visible
+def parse_param(
+    self,
+    param_el: ET.Element,
+    parentType: str,
+    parentPath: str,
+    layerName: str,
+    serviceShortName: str,
+    dop_by_id: Dict[str, OdxDataObjectProp],
+    dop_by_sn: Dict[str, OdxDataObjectProp],
+    dop_meta_by_id: Dict[str, Dict[str, str]],
+    struct_by_id: Dict[str, List[ET.Element]],
+    struct_by_sn: Dict[str, List[ET.Element]],
+    table_by_id: Dict[str, Dict],
+) -> OdxParam:
 
-    pname = getattr(p, "shortName", "") or "(param)"
-    semantic = getattr(p, "semantic", "") or ""
-    third = cell_value(p)
+    attrs = get_all_attrs(param_el)
 
-    # Determine match
-    match_self = True
-    if self._filter_text:
-        match_self = any(
-            self._filter_text in (t or "").lower()
-            for t in (pname, semantic, third)
+    codedConst = find_child(param_el, "CODED-CONST")
+    physConst  = find_child(param_el, "PHYS-CONST")
+    dopRef     = find_child(param_el, "DOP-REF")
+    dopSnRef   = find_child(param_el, "DOP-SNREF")
+    compuRef   = find_child(param_el, "COMPU-METHOD-REF")
+    diagType   = find_child(param_el, "DIAG-CODED-TYPE")
+    physType   = find_child(param_el, "PHYSICAL-TYPE")
+
+    shortName = get_text_local(param_el, "SHORT-NAME")
+    semantic  = (
+        attrs.get("SEMANTIC")
+        or attrs.get("semantic")
+        or get_text_local(param_el, "SEMANTIC")
+        or ""
+    )
+
+    coded_value = extract_coded_value(codedConst) if codedConst is not None else ""
+    if not coded_value:
+        coded_value = extract_coded_value(param_el)
+
+    pid = f"{layerName}::{serviceShortName}::{parentType}::{shortName}::{uuid.uuid4().hex[:9]}"
+
+    p = OdxParam(
+        id=pid,
+        shortName=shortName,
+        longName=get_text_local(param_el, "LONG-NAME"),
+        description=get_text_local(param_el, "DESC"),
+        semantic=semantic,
+        bytePosition=get_text_local(param_el, "BYTE-POSITION"),
+        bitPosition=get_text_local(param_el, "BIT-POSITION"),
+        bitLength=get_text_local(diagType, "BIT-LENGTH") if diagType else "",
+        minLength=get_text_local(diagType, "MIN-LENGTH") if diagType else "",
+        maxLength=get_text_local(diagType, "MAX-LENGTH") if diagType else "",
+        baseDataType=get_attr(diagType, "BASE-DATA-TYPE") if diagType else "",
+        physicalBaseType=get_attr(physType, "BASE-DATA-TYPE") if physType else "",
+        isHighLowByteOrder=(
+            get_attr(diagType, "IS-HIGH-LOW-BYTE-ORDER")
+            or get_attr(diagType, "IS-HIGHLOW-BYTE-ORDER")
+        ) if diagType else "",
+        codedConstValue=coded_value,
+        physConstValue=get_text_local(physConst, "V") if physConst else "",
+        dopRefId=get_attr(dopRef, "ID-REF") if dopRef else "",
+        dopSnRefName=get_text_local(dopSnRef, "SHORT-NAME") if dopSnRef else "",
+        compuMethodRefId=get_attr(compuRef, "ID-REF") if compuRef else "",
+        parentType=parentType,
+        parentName=parentPath,
+        layerName=layerName,
+        serviceShortName=serviceShortName,
+        attrs=attrs,
+    )
+
+    # ---------------------------------------------------------
+    # Resolve DOP + inherit missing attributes
+    # ---------------------------------------------------------
+    dop: Optional[OdxDataObjectProp] = None
+    if p.dopRefId:
+        dop = dop_by_id.get(p.dopRefId)
+    if dop is None and p.dopSnRefName:
+        dop = dop_by_sn.get(p.dopSnRefName)
+
+    self._fill_from_dop_if_missing(p, dop, dop_meta_by_id)
+
+    next_path = f"{parentPath}.{shortName}" if parentPath else shortName
+
+    # =========================================================
+    # 1) INLINE STRUCTURE under PARAM  (highest priority)
+    # =========================================================
+    inline_struct = find_child(param_el, "STRUCTURE")
+    if inline_struct is not None:
+        params_block = find_child(inline_struct, "PARAMS")
+        struct_params = (
+            find_children(params_block, "PARAM")
+            if params_block is not None
+            else find_children(inline_struct, "PARAM")
         )
 
-    # Always create the node first (CRITICAL)
-    p_item = QTreeWidgetItem([pname, semantic, third])
-    p_item.setFlags(
-        p_item.flags()
-        | Qt.ItemFlag.ItemIsUserCheckable
-        | Qt.ItemFlag.ItemIsSelectable
-    )
-    p_item.setCheckState(0, Qt.CheckState.Unchecked)
-    p_item.setData(0, Qt.ItemDataRole.UserRole, p)
-    parent_item.addChild(p_item)
+        for child_el in struct_params:
+            child = self._try_parse_param(
+                child_el,
+                "STRUCTURE",
+                next_path,
+                layerName,
+                serviceShortName,
+                dop_by_id,
+                dop_by_sn,
+                dop_meta_by_id,
+                struct_by_id,
+                struct_by_sn,
+                table_by_id,
+            )
+            if child:
+                p.children.append(child)
 
-    # Render children
-    any_child_visible = False
-    for c in getattr(p, "children", []) or []:
-        if add_param_recursive(p_item, c):
-            any_child_visible = True
+    # =========================================================
+    # 2) DOP-owned STRUCTURE (CRITICAL for responses)
+    # =========================================================
+    if dop and getattr(dop, "structureParams", None):
+        for child_el in dop.structureParams:
+            child = self._try_parse_param(
+                child_el,
+                "STRUCTURE",
+                next_path,
+                layerName,
+                serviceShortName,
+                dop_by_id,
+                dop_by_sn,
+                dop_meta_by_id,
+                struct_by_id,
+                struct_by_sn,
+                table_by_id,
+            )
+            if child:
+                p.children.append(child)
 
-    # Apply filter visibility
-    if self._filter_text and not match_self and not any_child_visible:
-        parent_item.removeChild(p_item)
-        return False
+    # =========================================================
+    # 3) STRUCTURE via STRUCTURE-REF or DOP-REF
+    # =========================================================
+    struct_params: List[ET.Element] = []
 
-    param_count_visible += 1
-    return True
+    if p.dopRefId and p.dopRefId in struct_by_id:
+        struct_params = struct_by_id[p.dopRefId]
+    elif p.dopSnRefName and p.dopSnRefName in struct_by_sn:
+        struct_params = struct_by_sn[p.dopSnRefName]
+    else:
+        struct_ref = find_child(param_el, "STRUCTURE-REF")
+        if struct_ref is not None:
+            ref_id = get_attr(struct_ref, "ID-REF")
+            ref_sn = get_text_local(struct_ref, "SHORT-NAME")
+            struct_params = (
+                struct_by_id.get(ref_id)
+                or struct_by_sn.get(ref_sn)
+                or []
+            )
+
+    for child_el in struct_params:
+        child = self._try_parse_param(
+            child_el,
+            "STRUCTURE",
+            next_path,
+            layerName,
+            serviceShortName,
+            dop_by_id,
+            dop_by_sn,
+            dop_meta_by_id,
+            struct_by_id,
+            struct_by_sn,
+            table_by_id,
+        )
+        if child:
+            p.children.append(child)
+
+    # =========================================================
+    # 4) TABLE-KEY expansion
+    # =========================================================
+    table_ref = find_child(param_el, "TABLE-REF")
+    if table_ref is not None:
+        tbl_id = get_attr(table_ref, "ID-REF")
+        tbl = table_by_id.get(tbl_id)
+        if tbl:
+            for row in tbl.get("rows", []):
+                row_short = row.get("shortName") or row.get("longName") or "ROW"
+                row_param = OdxParam(
+                    id=f"{pid}::{row_short}",
+                    shortName=row_short,
+                    longName=row.get("longName", ""),
+                    description=row.get("desc", ""),
+                    semantic="TABLE-ROW",
+                    parentType="TABLE-KEY",
+                    parentName=next_path,
+                    layerName=layerName,
+                    serviceShortName=serviceShortName,
+                    attrs={
+                        "TABLE-SHORT-NAME": tbl.get("shortName", ""),
+                        "TABLE-ROW-ID": row.get("id", ""),
+                        "TABLE-ROW-KEY": row.get("key", ""),
+                    },
+                )
+
+                row_path = f"{next_path}.{row_short}"
+                for child_el in row.get("structParams", []) or []:
+                    child = self._try_parse_param(
+                        child_el,
+                        "STRUCTURE",
+                        row_path,
+                        layerName,
+                        serviceShortName,
+                        dop_by_id,
+                        dop_by_sn,
+                        dop_meta_by_id,
+                        struct_by_id,
+                        struct_by_sn,
+                        table_by_id,
+                    )
+                    if child:
+                        row_param.children.append(child)
+
+                p.children.append(row_param)
+
+    return p
