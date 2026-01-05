@@ -1,31 +1,31 @@
-def _parse_param_safe(
-    self,
-    param_el: ET.Element,
-    parentType: str,
-    parentPath: str,
-    layerName: str,
-    serviceShortName: str,
-):
-    try:
-        return self.parse_param(
-            param_el,
+
+base_path = svc_short
+rparams = _collect_params(req, "REQUEST", base_path)
+
+
+base_path = svc_short
+rparams = _collect_params(req, "REQUEST", base_path)
+
+base_path = f"{svc_short}.{rshort}"
+rparams = _collect_params(el, "NEG_RESPONSE", base_path)
+
+
+def _collect_params(msg_el, parentType, base_path):
+    params: List[OdxParam] = []
+    for p_el in findall_descendants(msg_el, "PARAM"):
+        rp = self._try_parse_param(
+            p_el,
             parentType,
-            parentPath,
-            layerName,
-            serviceShortName,
-            {}, {}, {}, {}, {}, {}
+            base_path,          # ← SINGLE SOURCE OF TRUTH
+            layer_short,
+            svc_short,
+            dop_by_id,
+            dop_by_sn,
+            dop_meta_by_id,
+            struct_by_id,
+            struct_by_sn,
+            table_by_id,
         )
-    except Exception:
-        # HARD fallback – always return something
-        return OdxParam(
-            id=f"{layerName}::{serviceShortName}::{parentType}::{get_text_local(param_el,'SHORT-NAME')}",
-            shortName=get_text_local(param_el, "SHORT-NAME"),
-            longName=get_text_local(param_el, "LONG-NAME"),
-            description=get_text_local(param_el, "DESC"),
-            semantic=get_text_local(param_el, "SEMANTIC"),
-            parentType=parentType,
-            parentName=parentPath,
-            layerName=layerName,
-            serviceShortName=serviceShortName,
-            attrs=get_all_attrs(param_el),
-        )
+        if rp is not None:
+            params.append(rp)
+    return params
