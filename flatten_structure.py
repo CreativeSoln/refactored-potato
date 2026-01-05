@@ -1,187 +1,220 @@
-from typing import List, Dict, Any
-from odxtools.database import Database
+def parse_param(
+    self,
+    param_el: ET.Element,
+    parentType: str,
+    parentPath: str,
+    layerName: str,
+    serviceShortName: str,
+    dop_by_id: Dict[str, OdxDataObjectProp],
+    dop_by_sn: Dict[str, OdxDataObjectProp],
+    dop_meta_by_id: Dict[str, Dict[str, str]],
+    struct_by_id: Dict[str, List[ET.Element]],
+    struct_by_sn: Dict[str, List[ET.Element]],
+    table_by_id: Dict[str, Dict],
+) -> OdxParam:
 
-from odx_utils import (
-    normalize_name,
-    safe_resolve,
-    get_child_parameters_from_dop,
-    get_physical_type,
-    get_scale_offset_unit
-)
+    attrs = get_all_attrs(param_el)
 
-# =========================
-# GLOBAL GROUP INDEX
-# =========================
-# Used for ECUs where OEM did NOT define structure,
-# but logically parameters form indexed arrays (Whl0..Whl3)
-GROUP_INDEX: Dict[str, int] = {}
+    shortName = get_text_local(param_el, "SHORT-NAME") or ""
+    semantic = (
+        attrs.get("SEMANTIC")
+        or get_text_local(param_el, "SEMANTIC")
+        or ""
+    )
 
-# Parameters to skip
-SKIP_PARAMS = {
-    "SID", "SID_RQ", "SID_PR",
-    "SERVICEID", "REQUESTSERVICEID", "RESPONSESERVICEID",
+    codedConst = find_child(param_el, "CODED-CONST")
+    physConst = find_child(param_el, "PHYS-CONST")
+    diagCodedType = find_child(param_el, "DIAG-CODED-TYPE")
+    physType = find_child(param_el, "PHYSICAL-TYPE")
 
-    "DID", "DATAIDENTIFIER", "DATA_IDENTIFIER",
-    "RECORDDATAIDENTIFIER", "RECORD_DATA_IDENTIFIER",
+    coded_value = extract_coded_value(codedConst) if codedConst is not None else ""
+    if not coded_value:
+        coded_value = extract_coded_value(param_el)
 
-    "RID", "ROUTINEIDENTIFIER", "ROUTINE_IDENTIFIER",
-    "SUBFUNCTION", "SF"
-}
+    pid = f"{layerName}::{serviceShortName}::{parentType}::{shortName}::{uuid.uuid4().hex[:8]}"
 
+    p = OdxParam(
+        id=pid,
+        shortName=shortName,
+        longName=get_text_local(param_el, "LONG-NAME"),
+        description=get_text_local(param_el, "DESC"),
+        semantic=semantic,
 
-def flatten_parameter(
-    param,
-    db: Database,
-    parent: str,
-    service_name: str,
-    struct_depth=1,
-    struct_hierarchy=None,
-    struct_hierarchy_detail=None,
-    structure_registry=None
-):
-    """
-    Universal parameter flattener.
-    Handles:
-      - Simple (leaf) parameters
-      - Structured parameters
-      - Nested structures
-      - Table parameters
-    """
+        bytePosition=get_text_local(param_el, "BYTE-POSITION"),
+        bitPosition=get_text_local(param_el, "BIT-POSITION"),
+        bitLength=get_text_local(diagCodedType, "BIT-LENGTH") if diagCodedType else "",
+        minLength=get_text_local(diagCodedType, "MIN-LENGTH") if diagCodedType else "",
+        maxLength=get_text_local(diagCodedType, "MAX-LENGTH") if diagCodedType else "",
+        baseDataType=get_attr(diagCodedType, "BASE-DATA-TYPE") if diagCodedType else "",
+        physicalBaseType=get_attr(physType, "BASE-DATA-TYPE") if physType else "",
 
-    results = []
+        codedConstValue=coded_value,
+        physConstValue=get_text_local(physConst, "V") if physConst else "",
 
-    if structure_registry is None:
-        structure_registry = {}
+        dopRefId=get_attr(find_child(param_el, "DOP-REF"), "ID-REF") or "",
+        dopSnRefName=get_text_local(find_child(param_el, "DOP-SNREF"), "SHORT-NAME") or "",
 
-    pname = getattr(param, "short_name", "UNKNOWN")
-    norm = normalize_name(pname)
+        parentType=parentType,
+        parentName=parentPath,
+        layerName=layerName,
+        serviceShortName=serviceShortName,
+        attrs=attrs,
+    )
 
-    if norm in SKIP_PARAMS:
-        return results
-
-    full_path = f"{parent}.{pname}" if parent else f"{service_name}.{pname}"
-
-    # ------------------ Resolve DOP ------------------
+    # -------------------------------------------------
+    # Resolve DOP (NO SIDE EFFECTS)
+    # -------------------------------------------------
     dop = None
-    if getattr(param, "dop_ref", None):
-        dop = safe_resolve(param.dop_ref, db)
+    if p.dopRefId:
+        dop = dop_by_id.get(p.dopRefId)
+    if dop is None and p.dopSnRefName:
+        dop = dop_by_sn.get(p.dopSnRefName)
 
-    children = get_child_parameters_from_dop(dop)
-    has_children = len(children) > 0
+    self._fill_from_dop_if_missing(p, dop, dop_meta_by_id)
 
-    para_type = "DIRECT_PA"
-    if has_children:
-        para_type = "STRUCT_PA"
-    elif getattr(param, "table_ref", None) or getattr(param, "table_row_ref", None):
-        para_type = "TABLEROW_PA"
+    next_path = f"{parentPath}.{shortName}" if parentPath else shortName
 
-    # =====================================================================
-    #                LEAF PARAMETER
-    # =====================================================================
-    if not has_children:
-        scale, offset, unit = get_scale_offset_unit(dop)
-
-        # -----------------------------
-        # ARRAY INDEX MANAGEMENT
-        # -----------------------------
-        parent_key = parent or service_name
-
-        global GROUP_INDEX
-        if parent_key not in GROUP_INDEX:
-            GROUP_INDEX[parent_key] = 0
-        else:
-            GROUP_INDEX[parent_key] += 1
-
-        array_index = GROUP_INDEX[parent_key]
-
-        # -----------------------------
-        # Bit length extraction
-        # -----------------------------
-        bitlen = 0
-        try:
-            if hasattr(dop, "diag_coded_type") and hasattr(dop.diag_coded_type, "bit_length"):
-                bitlen = dop.diag_coded_type.bit_length
-            elif hasattr(dop, "bit_length"):
-                bitlen = dop.bit_length
-        except:
-            pass
-
-        results.append({
-            "FullPath": full_path,
-
-            "serviceMeta": {
-                "paraType": para_type,
-                "structureKey": "",
-                "parameterIndexInsideStructure": array_index,
-                "arrayName": getattr(param, "short_name", ""),
-                "topStruct": parent
-            },
-
-            "responseMapping": {
-                "specificParaName": getattr(param, "short_name", ""),
-                "ParaType": get_physical_type(dop),
-                "Scale": scale,
-                "Offset": offset,
-                "Unit": unit
-            },
-
-            "bitLength": bitlen,
-            "Description": getattr(param, "long_name", "") or getattr(param, "description", "")
-        })
-
-        return results
-
-    # =====================================================================
-    #                STRUCTURE PARAMETER
-    # =====================================================================
-    if struct_hierarchy is None:
-        struct_hierarchy = [service_name]
-
-    if struct_hierarchy_detail is None:
-        struct_hierarchy_detail = [{
-            "shortName": service_name,
-            "longName": ""
-        }]
-
-    current_struct_short = getattr(param, "short_name", "UNKNOWN")
-    current_struct_long = getattr(param, "long_name", "") or getattr(param, "description", "")
-
-    new_hierarchy = struct_hierarchy + [current_struct_short]
-    new_hierarchy_detail = struct_hierarchy_detail + [{
-        "shortName": current_struct_short,
-        "LongName": current_struct_long
-    }]
-
-    # -------- Collect all leaves --------
-    temp = []
-    for sub in children:
-        temp.extend(
-            flatten_parameter(
-                sub,
-                db,
-                full_path,
-                service_name,
-                struct_depth=struct_depth + 1,
-                struct_hierarchy=new_hierarchy,
-                struct_hierarchy_detail=new_hierarchy_detail,
-                structure_registry=structure_registry
-            )
+    # =================================================
+    # (1) INLINE <STRUCTURE> UNDER <PARAM>
+    # =================================================
+    inline_struct = find_child(param_el, "STRUCTURE")
+    if inline_struct is not None:
+        params_block = find_child(inline_struct, "PARAMS")
+        struct_params = (
+            find_children(params_block, "PARAM")
+            if params_block is not None
+            else find_children(inline_struct, "PARAM")
         )
+        for child_el in struct_params:
+            child = self._try_parse_param(
+                child_el,
+                "STRUCTURE",
+                next_path,
+                layerName,
+                serviceShortName,
+                dop_by_id,
+                dop_by_sn,
+                dop_meta_by_id,
+                struct_by_id,
+                struct_by_sn,
+                table_by_id,
+            )
+            if child:
+                p.children.append(child)
 
-    # -------- Assign Index deterministically --------
-    for i, leaf in enumerate(temp):
-        sm = leaf.setdefault("serviceMeta", {})
-        sm["parameterIndexInsideStructure"] = i
+    # =================================================
+    # (2) TABLE-KEY EXPANSION
+    # =================================================
+    table_ref = find_child(param_el, "TABLE-REF")
+    if table_ref is not None:
+        tbl_id = get_attr(table_ref, "ID-REF")
+        tbl = table_by_id.get(tbl_id)
+        if tbl:
+            for row in tbl.get("rows", []):
+                row_label = row.get("shortName") or f"Row_{row.get('key', '')}"
+                row_param = OdxParam(
+                    id=f"{pid}::{row_label}",
+                    shortName=row_label,
+                    semantic="TABLE-ROW",
+                    parentType="TABLE-KEY",
+                    parentName=next_path,
+                    layerName=layerName,
+                    serviceShortName=serviceShortName,
+                    attrs={"TABLE-ROW-KEY": row.get("key", "")},
+                )
+                row_next = f"{next_path}.{row_label}"
+                for child_el in row.get("structParams", []) or []:
+                    child = self._try_parse_param(
+                        child_el,
+                        "STRUCTURE",
+                        row_next,
+                        layerName,
+                        serviceShortName,
+                        dop_by_id,
+                        dop_by_sn,
+                        dop_meta_by_id,
+                        struct_by_id,
+                        struct_by_sn,
+                        table_by_id,
+                    )
+                    if child:
+                        row_param.children.append(child)
+                p.children.append(row_param)
 
-    # -------- Register structure metadata --------
-    structure_key = ".".join(new_hierarchy)
+    # =================================================
+    # (3) DOP-OWNED STRUCTURE
+    # =================================================
+    if dop and getattr(dop, "structureParams", None):
+        for child_el in dop.structureParams:
+            child = self._try_parse_param(
+                child_el,
+                "STRUCTURE",
+                next_path,
+                layerName,
+                serviceShortName,
+                dop_by_id,
+                dop_by_sn,
+                dop_meta_by_id,
+                struct_by_id,
+                struct_by_sn,
+                table_by_id,
+            )
+            if child:
+                p.children.append(child)
 
-    structure_registry[structure_key] = {
-        "parameterCountInsideStructure": len(temp),
-        "structureLevelDepth": struct_depth + 1,
-        "structureHierarchy": new_hierarchy,
-        "structureHierarchyPath": structure_key,
-        "structureHierarchyDetailed": new_hierarchy_detail
-    }
+    # =================================================
+    # (4) DOP-REF → STRUCTURE
+    # =================================================
+    struct_params = []
+    if p.dopRefId and p.dopRefId in struct_by_id:
+        struct_params = struct_by_id[p.dopRefId]
+    elif p.dopSnRefName and p.dopSnRefName in struct_by_sn:
+        struct_params = struct_by_sn[p.dopSnRefName]
 
-    return temp
+    for child_el in struct_params:
+        child = self._try_parse_param(
+            child_el,
+            "STRUCTURE",
+            next_path,
+            layerName,
+            serviceShortName,
+            dop_by_id,
+            dop_by_sn,
+            dop_meta_by_id,
+            struct_by_id,
+            struct_by_sn,
+            table_by_id,
+        )
+        if child:
+            p.children.append(child)
+
+    # =================================================
+    # (5) DIRECT STRUCTURE-REF
+    # =================================================
+    struct_ref = find_child(param_el, "STRUCTURE-REF")
+    if struct_ref is not None:
+        ref_id = get_attr(struct_ref, "ID-REF")
+        ref_sn = get_text_local(struct_ref, "SHORT-NAME")
+        struct_params = (
+            struct_by_id.get(ref_id)
+            or struct_by_sn.get(ref_sn)
+            or []
+        )
+        for child_el in struct_params:
+            child = self._try_parse_param(
+                child_el,
+                "STRUCTURE",
+                next_path,
+                layerName,
+                serviceShortName,
+                dop_by_id,
+                dop_by_sn,
+                dop_meta_by_id,
+                struct_by_id,
+                struct_by_sn,
+                table_by_id,
+            )
+            if child:
+                p.children.append(child)
+
+    return p
