@@ -413,7 +413,7 @@ class ODXParser:
         pos_resp_map: Dict[str, OdxMessage] = {}
         neg_resp_map: Dict[str, OdxMessage] = {}
 
-        for req in findall_descendants(layer_el, "REQUEST"):
+        for req in find_children(layer_el, "REQUEST"):
             rid = get_attr(req, "ID")
             rparams = []
             for p_el in find_children(req, "PARAM"):
@@ -492,7 +492,12 @@ class ODXParser:
                 root_path = f"{svc_short}.{rshort}"
                 rparams: List[OdxParam] = []
 
-                for p_el in findall_descendants(inline_req, "PARAM"):
+                param_blocks = (
+                    find_children(inline_req, "PARAM")
+                    or findall_descendants(inline_req, "PARAM")
+                )
+
+                for p_el in param_blocks:
                     rp = self._try_parse_param(
                         p_el, "REQUEST", root_path, layer_short, svc_short,
                         dop_by_id, dop_by_sn, dop_meta_by_id,
@@ -526,7 +531,12 @@ class ODXParser:
                 root_path = f"{svc_short}.{rshort}"
                 rparams: List[OdxParam] = []
 
-                for p_el in findall_descendants(el, "PARAM"):
+                param_blocks = (
+                    find_children(el, "PARAM")
+                    or findall_descendants(el, "PARAM")
+                )
+
+                for p_el in param_blocks:
                     rp = self._try_parse_param(
                         p_el, "POS_RESPONSE", root_path, layer_short, svc_short,
                         dop_by_id, dop_by_sn, dop_meta_by_id,
@@ -562,7 +572,12 @@ class ODXParser:
                 root_path = f"{svc_short}.{rshort}"
                 rparams: List[OdxParam] = []
 
-                for p_el in findall_descendants(el, "PARAM"):
+                param_blocks = (
+                    find_children(el, "PARAM")
+                    or findall_descendants(el, "PARAM")
+                )
+
+                for p_el in param_blocks:
                     rp = self._try_parse_param(
                         p_el, "NEG_RESPONSE", root_path, layer_short, svc_short,
                         dop_by_id, dop_by_sn, dop_meta_by_id,
@@ -582,10 +597,11 @@ class ODXParser:
                 )
 
             logger.warning(
-                "[SERVICE CHECK] %s POS=%d NEG=%d",
-                svc_short, len(pos_responses), len(neg_responses)
+                "[PARAM COUNT] %s REQ=%d POS=%d",
+                svc_short,
+                len(request.params) if request else -1,
+                len(pos_responses[0].params) if pos_responses else -1
             )
-
             services.append(
                 OdxService(
                     id=svc_attrs.get("ID", ""),
