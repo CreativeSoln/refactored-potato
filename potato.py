@@ -1,3 +1,43 @@
+def _compute_compu_min_max(self, compu_method):
+    """
+    Returns:
+        (raw_min, raw_max, phys_min, phys_max)
+    """
+    if not compu_method or not getattr(compu_method, "scales", None):
+        return None, None, None, None
+
+    raw_lows = []
+    raw_highs = []
+    phys_lows = []
+    phys_highs = []
+
+    for s in compu_method.scales:
+        lo = getattr(s, "lowerLimit", None)
+        hi = getattr(s, "upperLimit", None)
+
+        if lo is not None:
+            raw_lows.append(lo)
+        if hi is not None:
+            raw_highs.append(hi)
+
+        # Physical range (linear only)
+        factor = getattr(s, "factor", None)
+        offset = getattr(s, "offset", None) or 0
+
+        if factor is not None:
+            if lo is not None:
+                phys_lows.append(lo * factor + offset)
+            if hi is not None:
+                phys_highs.append(hi * factor + offset)
+
+    raw_min = min(raw_lows) if raw_lows else None
+    raw_max = max(raw_highs) if raw_highs else None
+    phys_min = min(phys_lows) if phys_lows else None
+    phys_max = max(phys_highs) if phys_highs else None
+
+    return raw_min, raw_max, phys_min, phys_max
+
+
 4️⃣ Visual semantic cues (color + icons)
 Examples
 Semantic	Visual
