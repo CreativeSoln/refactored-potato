@@ -1,3 +1,8 @@
+COMPU-METHOD: CM_WheelSpeed
+
+Raw Min / Max:        0 .. 65535
+Physical Min / Max:   0.0 .. 250.0 km/h
+
 def _compute_compu_min_max(self, compu_method):
     """
     Returns:
