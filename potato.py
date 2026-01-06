@@ -1,3 +1,28 @@
+def _add_params(self, parent_item, params, svc, parent_path=""):
+    for p in params:
+        item = QTreeWidgetItem(parent_item)
+        item.setText(0, p.shortName)
+        item.setText(1, p.semantic)
+
+        full_path = f"{parent_path}.{p.shortName}" if parent_path else p.shortName
+
+        item.setData(
+            0,
+            Qt.ItemDataRole.UserRole,
+            {
+                "path": full_path,
+                "service": svc.shortName,
+                "param": p,
+            }
+        )
+
+        # Info column logic stays unchanged
+        # ...
+
+        if p.children:
+            self._add_params(item, p.children, svc, full_path)
+
+
 COMPU-METHOD: CM_WheelSpeed
 
 Raw Min / Max:        0 .. 65535
