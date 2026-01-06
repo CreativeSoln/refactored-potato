@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 import xml.etree.ElementTree as ET
@@ -8,48 +8,125 @@ import xml.etree.ElementTree as ET
 # =========================================================
 # PARAM
 # =========================================================
+
 @dataclass
 class OdxParam:
-    id: str
-    shortName: str
+    # ---- Identity / naming ----
+    id: str = ""
+    shortName: str = ""
     longName: str = ""
     description: str = ""
     semantic: str = ""
 
+    # ---- Positioning / size ----
     bytePosition: str = ""
     bitPosition: str = ""
     bitLength: str = ""
     minLength: str = ""
     maxLength: str = ""
 
+    # ---- Types ----
     baseDataType: str = ""
     physicalBaseType: str = ""
     isHighLowByteOrder: str = ""
 
+    # ---- Constants ----
     codedConstValue: str = ""
     physConstValue: str = ""
 
+    # ---- NEW (UI-required fields) ----
+    # These were missing earlier and caused failures
+    value: str = ""           # decoded or raw value
+    rawHex: str = ""          # raw hex bytes
+    displayHex: str = ""      # formatted hex for UI
+    requestDidHex: str = ""   # DID hex for request context
+
+    # ---- References ----
     dopRefId: str = ""
     dopSnRefName: str = ""
     compuMethodRefId: str = ""
 
+    # ---- Hierarchy / context ----
     parentType: str = ""
     parentName: str = ""
-
     layerName: str = ""
     serviceShortName: str = ""
 
-    attrs: Dict[str, str] = field(default_factory=dict)
+    # ---- Children ----
     children: List["OdxParam"] = field(default_factory=list)
+
+    # ---- Attributes ----
+    attrs: Dict[str, Any] = field(default_factory=dict)
+
+
+# =========================================================
+# MESSAGE
+# =========================================================
+
+@dataclass
+class OdxMessage:
+    id: str = ""
+    shortName: str = ""
+    longName: str = ""
+    params: List[OdxParam] = field(default_factory=list)
+
+
+# =========================================================
+# SERVICE
+# =========================================================
+
+@dataclass
+class OdxService:
+    id: str = ""
+    shortName: str = ""
+    longName: str = ""
+    description: str = ""
+    semantic: str = ""
+    addressing: str = ""
+
+    # UDS
+    sid: Optional[int] = None
+
+    # Messages
+    request: Optional[OdxMessage] = None
+    posResponses: List[OdxMessage] = field(default_factory=list)
+    negResponses: List[OdxMessage] = field(default_factory=list)
+
+    # Attributes
+    attrs: Dict[str, Any] = field(default_factory=dict)
+
+
+# =========================================================
+# DATA OBJECT PROP (DOP)
+# =========================================================
+
+@dataclass
+class OdxDataObjectProp:
+    id: str = ""
+    shortName: str = ""
+    longName: str = ""
+    description: str = ""
+
+    baseDataType: str = ""
+    
+    physicalBaseDataType: str = ""
+    bitLength: str = ""
+
+    unitRefId: str = ""
+    compuCategory: str = ""
+
+    # STRUCTURE support
+    structureParams: List[ET.Element] = field(default_factory=list)
 
 
 # =========================================================
 # UNIT
 # =========================================================
+
 @dataclass
 class OdxUnit:
-    id: str
-    shortName: str
+    id: str = ""
+    shortName: str = ""
     longName: str = ""
     displayName: str = ""
     factorSiToUnit: str = ""
@@ -58,11 +135,22 @@ class OdxUnit:
 
 
 # =========================================================
-# COMPU METHOD / SCALE / TABLE
+# COMPU METHOD
 # =========================================================
+
+@dataclass
+class OdxCompuScale:
+    lowerLimit: str = ""
+    upperLimit: str = ""
+    compuConstV: str = ""
+    compuConstVT: str = ""
+    numerators: List[str] = field(default_factory=list)
+    denominators: List[str] = field(default_factory=list)
+
+
 @dataclass
 class OdxTableRow:
-    id: str
+    id: str = ""
     shortName: str = ""
     longName: str = ""
     description: str = ""
@@ -71,19 +159,9 @@ class OdxTableRow:
 
 
 @dataclass
-class OdxCompuScale:
-    lowerLimit: str = ""
-    upperLimit: str = ""
-    compuConstVt: str = ""
-    compuConstVT: str = ""
-    numerators: List[str] = field(default_factory=list)
-    denominators: List[str] = field(default_factory=list)
-
-
-@dataclass
 class OdxCompuMethod:
-    id: str
-    shortName: str
+    id: str = ""
+    shortName: str = ""
     longName: str = ""
     category: str = ""
     scales: List[OdxCompuScale] = field(default_factory=list)
@@ -91,54 +169,29 @@ class OdxCompuMethod:
 
 
 # =========================================================
-# DATA OBJECT PROP (DOP)
+# DTC
 # =========================================================
+
 @dataclass
-class OdxDataObjectProp:
-    id: str
-    shortName: str
+class OdxDTC:
+    id: str = ""
+    shortName: str = ""
     longName: str = ""
     description: str = ""
-    baseDataType: str = ""
-    bitlength: str = ""
-    physicalBaseDataType: str = ""
-    unitRefId: str = ""
-    compuCategory: str = ""
-    structureParams: List[ET.Element] = field(default_factory=list)
+    troubleCode: str = ""
+    displayTroubleCode: str = ""
+    level: str = ""
 
 
 # =========================================================
-# MESSAGE / SERVICE / LAYER
+# LAYER
 # =========================================================
-@dataclass
-class OdxMessage:
-    id: str
-    shortName: str
-    longName: str = ""
-    params: List[OdxParam] = field(default_factory=list)
-
-
-@dataclass
-class OdxService:
-    id: str
-    shortName: str
-    longName: str = ""
-    description: str = ""
-    semantic: str = ""
-    addressing: str = ""
-
-    request: Optional[OdxMessage] = None
-    posResponses: List[OdxMessage] = field(default_factory=list)
-    negResponses: List[OdxMessage] = field(default_factory=list)
-
-    attrs: Dict[str, str] = field(default_factory=dict)
-
 
 @dataclass
 class OdxLayer:
-    layerType: str
-    id: str
-    shortName: str
+    layerType: str = ""
+    id: str = ""
+    shortName: str = ""
     longName: str = ""
     description: str = ""
 
@@ -150,14 +203,16 @@ class OdxLayer:
     units: List[OdxUnit] = field(default_factory=list)
     compuMethods: List[OdxCompuMethod] = field(default_factory=list)
     dataObjectProps: List[OdxDataObjectProp] = field(default_factory=list)
+    dtcs: List[OdxDTC] = field(default_factory=list)
 
-    attrs: Dict[str, str] = field(default_factory=dict)
     linkedLayerIds: List[str] = field(default_factory=list)
+    attrs: Dict[str, Any] = field(default_factory=dict)
 
 
 # =========================================================
-# CONTAINER + DATABASE
+# CONTAINER / DATABASE
 # =========================================================
+
 @dataclass
 class OdxContainer:
     protocols: List[OdxLayer] = field(default_factory=list)
@@ -173,11 +228,10 @@ class OdxDatabase:
     baseVariants: List[OdxLayer] = field(default_factory=list)
     protocols: List[OdxLayer] = field(default_factory=list)
     functionalGroups: List[OdxLayer] = field(default_factory=list)
-
-    allDataObjects: List[Dict[str, Any]] = field(default_factory=list)
     ecuSharedData: List[OdxLayer] = field(default_factory=list)
 
-    allDTCs: List[Dict[str, Any]] = field(default_factory=list)
     allParams: List[OdxParam] = field(default_factory=list)
     allUnits: List[Dict[str, Any]] = field(default_factory=list)
     allCompuMethods: List[Dict[str, Any]] = field(default_factory=list)
+    allDataObjects: List[Dict[str, Any]] = field(default_factory=list)
+    allDTCs: List[Dict[str, Any]] = field(default_factory=list)
