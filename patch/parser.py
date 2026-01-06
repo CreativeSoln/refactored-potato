@@ -346,9 +346,9 @@ class ODXParser:
             shortName=get_text_local(dop_el, 'SHORT-NAME'),
             longName=get_text_local(dop_el, 'LONG-NAME'),
             description=get_text_local(dop_el, 'DESC'),
-            baseDataType=get_text_local(diagCodedType, 'BASE-DATA-TYPE') if diagCodedType is not None else '',
+            baseDataType=get_attr(diagCodedType, 'BASE-DATA-TYPE') if diagCodedType is not None else '',
             bitLength=get_text_local(diagCodedType, 'BIT-LENGTH') if diagCodedType is not None else '',
-            physicalBaseDataType=get_text_local(phySType, 'BASE-DATA-TYPE') if phySType is not None else '',
+            physicalBaseDataType=get_attr(phySType, 'BASE-DATA-TYPE') if phySType is not None else '',
             unitRefId=get_attr(unitRef, 'ID-REF') if unitRef is not None else '',
             compuCategory=get_text_local(compuMethod, 'CATEGORY') if compuMethod is not None else '',
             structureParams=struct_params,
@@ -446,7 +446,8 @@ class ODXParser:
         for t in findall_descendants(layer_el, 'TABLE'):
             tid = get_attr(t, 'ID')
             tsn = get_text_local(t, 'SHORT-NAME')
-            key_dop_ref = getattr(find_child(t, 'KEY-DOP-REF'), 'ID-REF')
+            key_dop_el = find_child(t, 'KEY-DOP-REF')
+            key_dop_ref = get_attr(key_dop_el, 'ID-REF')
 
             rows = []
             for tr in findall_descendants(t, 'TABLE-ROW'):
@@ -800,22 +801,56 @@ class ODXParser:
         )
 
     def _parse_compu_method(self, compu_el: ET.Element) -> OdxCompuMethod:
+
+        # Parse COMPU-METHOD with richer category handling (TEXTTABLE, LINEAR/IDENTICAL, BITMASK, RATIONAL)
         internal_to_phys = find_child(compu_el, "COMPU-INTERNAL-TO-PHYS")
         scales: List[OdxCompuScale] = []
+        category = get_text_local(compu_el, "CATEGORY").upper() if get_text_local(compu_el, "CATEGORY") else ""
+
         if internal_to_phys is not None:
             for scale in get_elements(internal_to_phys, "COMPU-SCALE"):
-                compuConst = find_child(scale, "COMPU-CONST")
-                compuRational = find_child(scale, "COMPU-RATIONAL-COEFFS")
+                lower = get_text_local(scale, "LOWER-LIMIT")
+                upper = get_text_local(scale, "UPPER-LIMIT")
+
+                # Common sub-nodes that appear in multiple categories
+                compuConst      = find_child(scale, "COMPU-CONST")
+                compuRational   = find_child(scale, "COMPU-RATIONAL-COEFFS")
+                textValueNode   = find_child(scale, "TEXT-VALUE")  # some dialects
+                bitMaskNode     = find_child(scale, "BIT-MASK")     # BITMASK category
+
+                # Gather rational coefficients (NUM/DEN) if present
+                nums = [(n.text or "") for n in get_elements(compuRational, "NUM")] if compuRational is not None else []
+                dens = [(d.text or "") for d in get_elements(compuRational, "DEN")] if compuRational is not None else []
+
+                # TEXTTABLE: often expressed via COMPU-CONST with VT (text) and V (coded)
+                # LINEAR / IDENTICAL: rational with simple A/B terms; general RATIONAL also maps here
+                # BITMASK: BIT-MASK element indicates the active mask
+                vt = get_text_local(compuConst, "VT") if compuConst is not None else (get_text_local(scale, "VT") if scale is not None else "")
+                v  = get_text_local(compuConst, "V")  if compuConst is not None else (get_text_local(scale, "V")  if scale is not None else "")
+
+                # For dialects using TEXT-VALUE as the textual representation
+                if not vt and textValueNode is not None:
+                    vt = (textValueNode.text or "").strip()
+
+                # For BITMASK, capture mask bits into numerators list as a single value
+                if bitMaskNode is not None:
+                    mask_text = (bitMaskNode.text or "").strip()
+                    if mask_text:
+                        # Store mask in numerators for downstream consumers; you may adapt your model later
+                        nums = [mask_text]
+
                 scales.append(
                     OdxCompuScale(
-                        lowerLimit=get_text_local(scale, "LOWER-LIMIT"),
-                        upperLimit=get_text_local(scale, "UPPER-LIMIT"),
-                        compuConstV=get_text_local(compuConst, "V") if compuConst is not None else '',
-                        compuConstVT=get_text_local(compuConst, "VT") if compuConst is not None else '',
-                        numerators=[(n.text or '') for n in get_elements(compuRational, "NUM")] if compuRational is not None else [],
-                        denominators=[(d.text or '') for d in get_elements(compuRational, "DEN")] if compuRational is not None else [],
+                        lowerLimit=lower,
+                        upperLimit=upper,
+                        compuConstV=v,
+                        compuConstVT=vt,
+                        numerators=nums,
+                        denominators=dens,
                     )
                 )
+
+        # Table rows (TEXTTABLE rows sometimes appear as TABLE-ROW under COMPU-METHOD)
         table_rows: List[OdxTableRow] = []
         for tr in findall_descendants(compu_el, "TABLE-ROW"):
             table_rows.append(
@@ -828,6 +863,7 @@ class ODXParser:
                     structureRefId=get_attr(find_child(tr, "STRUCTURE-REF"), "ID-REF"),
                 )
             )
+
         return OdxCompuMethod(
             id=get_attr(compu_el, "ID"),
             shortName=get_text_local(compu_el, "SHORT-NAME"),
@@ -836,6 +872,7 @@ class ODXParser:
             scales=scales,
             tableRows=table_rows
         )
+    
 
     def flatten_service_params(self, service: OdxService) -> List[OdxParam]:
         out: List[OdxParam] = []
@@ -918,39 +955,7 @@ class ODXParser:
             if i:
                 id = {x for x in i.split("\n") if x}
         return sn, id
-# '''
-#     def _resolve_links_for_layer(self, layer: OdxLayer, id_map: Dict[str, OdxLayer], visited: Set[str]) -> None:
-#         if not layer.linkedLayerIds:
-#             return
-#         if layer.id in visited:
-#             return
-#         visited.add(layer.id)
-#         ni_sn, ni_ids = self._get_not_inherited_sets(layer)
-#         for ref_id in layer.linkedLayerIds:
-#             ref_layer = id_map.get(ref_id)
-#             if not ref_layer:
-#                 continue
-#             self._resolve_links_for_layer(ref_layer, id_map, visited)
-#             for ref_id in ref_layer.linkedLayerIds:
-#                 ref = id_map.get(ref_id)
-#                 if not ref:
-#                     continue
-#                 self._resolve_links_for_layer(ref_layer, id_map, visited)
-#             if ni_sn or ni_ids:
-#                 filtered_services = []
-#                 for svc in ref_layer.services:
-#                     if (svc.shortName and svc.shortName in ni_sn) or (svc.id and svc.id in ni_ids):
-#                         continue
-#                     filtered_services.append(svc)
-#                 layer.services.extend(filtered_services)
-#             else:
-#                 layer.services.extend(ref_layer.services)
-#             layer.units.extend(ref_layer.units)
-#             layer.compuMethods.extend(ref_layer.compuMethods)
-#             layer.dataObjectProps.extend(ref_layer.dataObjectProps)
-#             layer.dtcs.extend(ref_layer.dtcs)
-#         layer.services = self._dedup_services(layer.services)
-# '''
+
     # ---------------------------- PARSE PARAM ----------------------------
     def parse_param(
         self,
@@ -1182,73 +1187,6 @@ class ODXParser:
 
         return p
 
-
-    # # ---------------------------- MERGE CONTAINERS ----------------------------
-    # def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
-    #     db = OdxDatabase()
-    #     for c in containers:
-    #         db.ecuVariants.extend(c.ecuVariants)
-    #         db.baseVariants.extend(c.baseVariants)
-    #         db.protocols.extend(c.protocols)
-    #         db.functionalGroups.extend(c.functionalGroups)
-    #         db.ecuSharedData.extend(c.ecuSharedData)
-    #     all_layers = (
-    #         db.ecuVariants + db.baseVariants + db.protocols + db.functionalGroups + db.ecuSharedData
-    #     )
-    #     id_map: Dict[str, OdxLayer] = {lay.id: lay for lay in all_layers if lay.id}
-    #     cache 
-    #     for _ in range(2):
-    #         for lay in all_layers:
-    #             self._resolve_links_for_layer(lay, id_map, set())
-    #     for layer in all_layers:
-    #         for p in self.flatten_layer_params(layer):
-    #             p.layerName = layer.shortName
-    #             db.allParams.append(p)
-    #         for u in layer.units:
-    #             dd = asdict(u); dd['layerName'] = layer.shortName
-    #             db.allUnits.append(dd)
-    #         for cm in layer.compuMethods:
-    #             dd = asdict(cm); dd['layerName'] = layer.shortName
-    #             db.allCompuMethods.append(dd)
-    #         for dop in layer.dataObjectProps:
-    #             dd = asdict(dop); dd['layerName'] = layer.shortName
-    #             dd.pop('structureParams', None)
-    #             db.allDataObjects.append(dd)
-    #         for dtc in layer.dtcs:
-    #             dd = asdict(dtc); dd['layerName'] = layer.shortName
-    #             db.allDTCs.append(dd)
-    #     self._populate_presentation_fields(db)
-    #     return db
-
-    # def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
-    #     db = OdxDatabase()
-    #     for c in containers:
-    #         db.ecuVariants.extend(c.ecuVariants)
-    #         db.baseVariants.extend(c.baseVariants)
-    #         db.protocols.extend(c.protocols)
-    #         db.functionalGroups.extend(c.functionalGroups)
-    #         db.ecuSharedData.extend(c.ecuSharedData)
-
-    #     all_layers = (
-    #         db.ecuVariants + db.baseVariants +
-    #         db.protocols + db.functionalGroups +
-    #         db.ecuSharedData
-    #     )
-
-    #     id_map = {l.id: l for l in all_layers if l.id}
-    #     cache: Dict[str, Set[str]] = {}
-
-    #     for _ in range(2):
-    #         for l in all_layers:
-    #             self._resolve_links_for_layer(l, id_map, cache)
-
-    #     for layer in all_layers:
-    #         for svc in layer.services:
-    #             for p in svc.request.params if svc.request else []:
-    #                 db.allParams.append(p)
-
-    #     return db
-
     
     def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
         db = OdxDatabase()
@@ -1443,122 +1381,3 @@ class ODXParser:
             self._extend_unique(layer.dataObjectProps, ref.dataObjectProps, lambda x: x.id or x.shortName)
             self._extend_unique(layer.dtcs, ref.dtcs, lambda x: x.id or x.troubleCode)
 
-
-
-# # ===========================
-# # Patch: bounded link-resolution + dedup (prevents MemoryError)
-# # ===========================
-
-# from dataclasses import asdict
-# from typing import Dict, Set, List, Callable
-# import logging
-
-# logger = logging.getLogger(__name__)
-
-# # Unique extenders
-# def _extend_unique(self, target_list: List, source_list: List, key_fn: Callable) -> None:
-#     ''"Append only items with new keys; keeps order and prevents duplicates.''"
-#     seen = set()
-#     for x in target_list:
-#         try:
-#             k = key_fn(x)
-#         except Exception:
-#             k = None
-#         if k:
-#             seen.add(k)
-
-#     for x in (source_list or []):
-#         try:
-#             k = key_fn(x)
-#         except Exception:
-#             k = None
-#         if k and k not in seen:
-#             target_list.append(x)
-#             seen.add(k)
-
-# def _extend_unique_services(self, layer, new_services):
-#     def svc_key(s):
-#         return (getattr(s, 'id', None) or getattr(s, 'shortName', None) or '').strip()
-#     self._extend_unique(layer.services, new_services or [], svc_key)
-
-
-# def _resolve_links_for_layer(self, layer: OdxLayer, id_map: Dict[str, OdxLayer], reachable_cache: Dict[str, Set[str]]) -> None:
-#     if not layer or not getattr(layer, 'linkedLayerIds', None):
-#         return
-
-#     lid = getattr(layer, 'id', None) or getattr(layer, 'shortName', None) or ''
-#     if not lid:
-#         return
-
-#     reachable = reachable_cache.get(lid)
-#     if reachable is None:
-#         reachable = set()
-#         queue = list(layer.linkedLayerIds or [])
-#         while queue:
-#             rid = queue.pop()
-#             if not rid or rid in reachable:
-#                 continue
-#             reachable.add(rid)
-#             ref = id_map.get(rid)
-#             if ref and ref.linkedLayerIds:
-#                 queue.extend(ref.linkedLayerIds)
-#         reachable_cache[lid] = reachable
-
-#     ni_sn, ni_ids = self._get_not_inherited_sets(layer)
-#     for rid in reachable:
-#         ref_layer = id_map.get(rid)
-#         if not ref_layer:
-#             continue
-
-#         src_services = [
-#             svc for svc in ref_layer.services or []
-#             if not (getattr(svc, 'shortName', None) and getattr(svc, 'shortName') in ni_sn) or
-#                (getattr(svc, 'id', None) and getattr(svc, 'id') in ni_ids)
-#         ]
-
-#         self._extend_unique_services(layer, src_services)
-#         self._extend_unique(layer.units, ref_layer.units, lambda x: (getattr(x, 'id', None) or getattr(x, 'shortName', None) or '').strip())
-#         self._extend_unique(layer.compuMethods, ref_layer.compuMethods, lambda x: (getattr(x, 'id', None) or getattr(x, 'shortName', None) or '').strip())
-#         self._extend_unique(layer.dataObjectProps, ref_layer.dataObjectProps, lambda x: (getattr(x, 'id', None) or getattr(x, 'shortName', None) or '').strip())
-#         self._extend_unique(layer.dtcs, ref_layer.dtcs, lambda x: (getattr(x, 'id', None) or getattr(x, 'troubleCode', None) or '').strip())
-
-# def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
-#         db = OdxDatabase()
-#         for c in containers:
-#             db.ecuVariants.extend(c.ecuVariants)
-#             db.baseVariants.extend(c.baseVariants)
-#             db.protocols.extend(c.protocols)
-#             db.functionalGroups.extend(c.functionalGroups)
-#             db.ecuSharedData.extend(c.ecuSharedData)
-#         all_layers = (
-#             db.ecuVariants + db.baseVariants + db.protocols + db.functionalGroups + db.ecuSharedData
-#         )
-#         id_map: Dict[str, OdxLayer] = {lay.id: lay for lay in all_layers if lay.id}
-#         for _ in range(2):
-#             for lay in all_layers:
-#                 self._resolve_links_for_layer(lay, id_map, set())
-#         for layer in all_layers:
-#             for p in self.flatten_layer_params(layer):
-#                 p.layerName = layer.shortName
-#                 db.allParams.append(p)
-#             for u in layer.units:
-#                 dd = asdict(u); dd['layerName'] = layer.shortName
-#                 db.allUnits.append(dd)
-#             for cm in layer.compuMethods:
-#                 dd = asdict(cm); dd['layerName'] = layer.shortName
-#                 db.allCompuMethods.append(dd)
-#             for dop in layer.dataObjectProps:
-#                 dd = asdict(dop); dd['layerName'] = layer.shortName
-#                 dd.pop('structureParams', None)
-#                 db.allDataObjects.append(dd)
-#             for dtc in layer.dtcs:
-#                 dd = asdict(dtc); dd['layerName'] = layer.shortName
-#                 db.allDTCs.append(dd)
-#         self._populate_presentation_fields(db)
-#         return db
-
-# # Apply overrides to class defined above
-# ODXParser._extend_unique = _extend_unique
-# ODXParser.merge_containers = merge_containers
-
-#ODXParser._log_and_prefix = _log_and_prefix
