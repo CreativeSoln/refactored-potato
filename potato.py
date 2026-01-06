@@ -1,3 +1,29 @@
+def build_search_index(self):
+    self._search_index = []
+
+    def walk(item):
+        text = item.text(0)
+        meta = item.data(0, Qt.ItemDataRole.UserRole)
+
+        if isinstance(meta, dict):
+            blob = " ".join([
+                text,
+                meta.get("path", ""),
+                meta.get("did", ""),
+                meta.get("service", ""),
+            ]).lower()
+        else:
+            blob = text.lower()
+
+        self._search_index.append((blob, item))
+
+        for i in range(item.childCount()):
+            walk(item.child(i))
+
+    for i in range(self.tree.topLevelItemCount()):
+        walk(self.tree.topLevelItem(i))
+
+
 
 from __future__ import annotations
 
