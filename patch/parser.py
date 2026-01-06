@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 import xml.etree.ElementTree as ET
 from dataclasses import asdict
 from typing import List, Dict, Tuple, Optional, Set, Callable
+import hashlib
 
 from models import (
     OdxParam,
@@ -170,7 +171,29 @@ class ODXParser:
     def __init__(self) -> None:
         self._fmt = FormatterService()
 
-    
+    import hashlib
+
+    def _make_param_id(
+        self,
+        layerName: str,
+        serviceShortName: str,
+        parentType: str,
+        parentPath: str,
+        shortName: str,
+        semantic: str,
+    ) -> str:
+        base = "|".join([
+            layerName or "",
+            serviceShortName or "",
+            parentType or "",
+            parentPath or "",
+            shortName or "",
+            semantic or "",
+        ])
+        digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
+        return f"{layerName}::{serviceShortName}::{parentType}::{shortName}::{digest}"
+
+
     # --- injected helper (_log_and_prefix) from image ---
     def _log_and_prefix(self, params: List[OdxParam], prefix: str, context: str) -> None:
         if not params:
@@ -415,6 +438,7 @@ class ODXParser:
         linked_ids = self._collect_links(layer_el)
         ni_sn, ni_ids = self._parse_not_inherited(layer_el)
         
+        
         # ---------------------------------------------------------
         # TABLES (for TABLE-KEY)
         # ---------------------------------------------------------
@@ -545,7 +569,7 @@ class ODXParser:
                 if base:
                     req = self._clone_message(base)
                     self._log_and_prefix(req.params, (svc_short + '.' + (req.shortName or 'Request')) if svc_short else (req.shortName or 'Request'), 'request-ref')
-                    self._annotate_service_name(base.params, svc_short)
+                    self._annotate_service_name(req.params, svc_short)
             else:
                 inline = find_child(svc_el, 'REQUEST')
                 if inline:
@@ -646,8 +670,9 @@ class ODXParser:
                 )
                 self._annotate_service_name(msg.params, svc_short)
                 self._log_and_prefix(msg.params, (svc_short + '.' + sn) if svc_short else sn, 'neg-inline')
-            # Fallback NEG
+                neg.append(msg)
             
+            # Fallback NEG
             for rid, msg in list(neg_resp_map.items()):
                 if any(r.id == rid for r in neg):
                     mname = (msg.shortName or '').lower()
@@ -850,6 +875,25 @@ class ODXParser:
                         excluded_ids.add(rid)
         return excluded_sn, excluded_ids
 
+    def _dedup_children(self, params: List[OdxParam]) -> List[OdxParam]:
+        seen = set()
+        out: List[OdxParam] = []
+
+        for p in params:
+            key = (
+                p.shortName,
+                p.semantic,
+                p.dopRefId or '',
+                p.parentType,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(p)
+
+        return out
+
+
     def _dedup_services(self, services: List[OdxService]) -> List[OdxService]:
         seen: Set[str] = set()
         result: List[OdxService] = []
@@ -943,7 +987,16 @@ class ODXParser:
         if not coded_value:
             coded_value = extract_coded_value(param_el)
 
-        pid = f"{layerName}::{serviceShortName}::{parentType}::{shortName}::{uuid.uuid4().hex[:8]}"
+        # pid = f"{layerName}::{serviceShortName}::{parentType}::{shortName}::{uuid.uuid4().hex[:8]}"
+        pid = self._make_param_id(
+                layerName,
+                serviceShortName,
+                parentType,
+                parentPath,
+                shortName,
+                semantic,
+            )
+
         p = OdxParam(
             id=pid,
             shortName=shortName,
@@ -1020,6 +1073,28 @@ class ODXParser:
                             "TABLE-ROW-KEY": row.get('key', ''),
                         },
                     )
+
+                    # 2️⃣ ADD discriminator PARAM (KEY-DOP)
+                    key_dop_id = tbl.get('keyDopRefId')
+                    if key_dop_id and key_dop_id in dop_by_id:
+                        dop = dop_by_id[key_dop_id]
+
+                        key_param = OdxParam(
+                            id=f"{row_param.id}::KEY",
+                            shortName="KEY",
+                            semantic="TABLE-KEY",
+                            parentType="TABLE-KEY",
+                            parentName=row_param.parentName,
+                            layerName=layerName,
+                            serviceShortName=serviceShortName,
+                            dopRefId=dop.id,
+                            baseDataType=dop.baseDataType,
+                            physicalBaseType=dop.physicalBaseDataType,
+                            bitLength=dop.bitLength,
+                            attrs={"TABLE-KEY": True},
+                        )
+
+                        row_param.children.insert(0, key_param)  # discriminator first
 
                     row_path = f"{next_path}.{row_short}"
                     for child_el in row.get('structParams', []) or []:
@@ -1101,6 +1176,10 @@ class ODXParser:
             if child:
                 p.children.append(child)
 
+        # Dedup ONCE at the end
+        if p.children:
+            p.children = self._dedup_children(p.children)
+
         return p
 
 
@@ -1141,8 +1220,40 @@ class ODXParser:
     #     self._populate_presentation_fields(db)
     #     return db
 
+    # def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
+    #     db = OdxDatabase()
+    #     for c in containers:
+    #         db.ecuVariants.extend(c.ecuVariants)
+    #         db.baseVariants.extend(c.baseVariants)
+    #         db.protocols.extend(c.protocols)
+    #         db.functionalGroups.extend(c.functionalGroups)
+    #         db.ecuSharedData.extend(c.ecuSharedData)
+
+    #     all_layers = (
+    #         db.ecuVariants + db.baseVariants +
+    #         db.protocols + db.functionalGroups +
+    #         db.ecuSharedData
+    #     )
+
+    #     id_map = {l.id: l for l in all_layers if l.id}
+    #     cache: Dict[str, Set[str]] = {}
+
+    #     for _ in range(2):
+    #         for l in all_layers:
+    #             self._resolve_links_for_layer(l, id_map, cache)
+
+    #     for layer in all_layers:
+    #         for svc in layer.services:
+    #             for p in svc.request.params if svc.request else []:
+    #                 db.allParams.append(p)
+
+    #     return db
+
+    
     def merge_containers(self, containers: List[OdxContainer]) -> OdxDatabase:
         db = OdxDatabase()
+
+        # 1) Flatten layers from all containers
         for c in containers:
             db.ecuVariants.extend(c.ecuVariants)
             db.baseVariants.extend(c.baseVariants)
@@ -1151,22 +1262,60 @@ class ODXParser:
             db.ecuSharedData.extend(c.ecuSharedData)
 
         all_layers = (
-            db.ecuVariants + db.baseVariants +
-            db.protocols + db.functionalGroups +
+            db.ecuVariants +
+            db.baseVariants +
+            db.protocols +
+            db.functionalGroups +
             db.ecuSharedData
         )
 
-        id_map = {l.id: l for l in all_layers if l.id}
+        # 2) Build id map and resolve links using cache (bounded BFS)
+        id_map: Dict[str, OdxLayer] = {lay.id: lay for lay in all_layers if lay.id}
         cache: Dict[str, Set[str]] = {}
+        for _ in range(2):  # small fixed passes
+            for lay in all_layers:
+                self._resolve_links_for_layer(lay, id_map, cache)
 
-        for _ in range(2):
-            for l in all_layers:
-                self._resolve_links_for_layer(l, id_map, cache)
-
+        # 3) Aggregate params and other artifacts into db (with layerName)
         for layer in all_layers:
-            for svc in layer.services:
-                for p in svc.request.params if svc.request else []:
-                    db.allParams.append(p)
+            # Params (request + pos + neg)
+            for svc in getattr(layer, 'services', []) or []:
+                if svc.request:
+                    for p in svc.request.params or []:
+                        p.layerName = layer.shortName
+                        db.allParams.append(p)
+                for rsp in svc.posResponses or []:
+                    for p in rsp.params or []:
+                        p.layerName = layer.shortName
+                        db.allParams.append(p)
+                for rsp in svc.negResponses or []:
+                    for p in rsp.params or []:
+                        p.layerName = layer.shortName
+                        db.allParams.append(p)
+
+            # Units
+            for u in layer.units:
+                dd = asdict(u); dd['layerName'] = layer.shortName
+                db.allUnits.append(dd)
+
+            # Compu Methods
+            for cm in layer.compuMethods:
+                dd = asdict(cm); dd['layerName'] = layer.shortName
+                db.allCompuMethods.append(dd)
+
+            # Data Object Props
+            for dop in layer.dataObjectProps:
+                dd = asdict(dop); dd['layerName'] = layer.shortName
+                dd.pop('structureParams', None)  # avoid large nested lists
+                db.allDataObjects.append(dd)
+
+            # DTCs
+            for dtc in layer.dtcs:
+                dd = asdict(dtc); dd['layerName'] = layer.shortName
+                db.allDTCs.append(dd)
+
+        # 4) Presentation enrichment (SID / DID / infoText / display values)
+        self._populate_presentation_fields(db)
 
         return db
 
@@ -1277,7 +1426,18 @@ class ODXParser:
             ref = id_map.get(rid)
             if not ref:
                 continue
-            self._extend_unique_services(layer, ref.services)
+
+            ni_sn, ni_ids = self._get_not_inherited_sets(layer)
+
+            src_services = [
+                svc for svc in ref.services
+                if not (
+                    (svc.shortName and svc.shortName in ni_sn) or
+                    (svc.id and svc.id in ni_ids)
+                )
+            ]       
+
+            self._extend_unique_services(layer, src_services)
             self._extend_unique(layer.units, ref.units, lambda x: x.id or x.shortName)
             self._extend_unique(layer.compuMethods, ref.compuMethods, lambda x: x.id or x.shortName)
             self._extend_unique(layer.dataObjectProps, ref.dataObjectProps, lambda x: x.id or x.shortName)
