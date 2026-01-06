@@ -1,3 +1,12 @@
+4️⃣ Visual semantic cues (color + icons)
+Examples
+Semantic	Visual
+SERVICE-ID	🔵 blue
+DATA-ID	🟣 purple
+TABLE-KEY	🟠 orange
+STRUCTURE	📦 folder
+DATA	⚪ normal
+
 Field	Source
 Name	param.shortName
 Full Path	meta["path"]
