@@ -1,26 +1,28 @@
-def _extract_did_from_request(self, service) -> str | None:
+from models import OdxParam
+
+def extract_did_from_service(service) -> str | None:
     if not service or not service.request:
         return None
 
     def walk(params):
         for p in params:
-            yield p
-            if p.children:
-                yield from walk(p.children)
+            if isinstance(p, OdxParam):
+                yield p
+                if p.children:
+                    yield from walk(p.children)
 
     for p in walk(service.request.params):
         if not p.semantic:
             continue
 
-        semantic = p.semantic.upper()
-
-        if semantic in {"DATA-ID", "DID", "DATA_IDENTIFIER"}:
+        if p.semantic.upper() in {"DATA-ID", "DID", "DATA_IDENTIFIER"}:
             if p.coded_const_value:
                 return p.coded_const_value
             if p.table_key:
                 return p.table_key
 
     return None
+
 
 
 def get_service_did_hex(service) -> str:
