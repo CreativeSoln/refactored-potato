@@ -1,3 +1,35 @@
+def _walk_params(self, params):
+    for p in params:
+        yield p
+        if p.children:
+            yield from self._walk_params(p.children)
+
+def _extract_did_from_request(self, request) -> str | None:
+    if not request or not request.params:
+        return None
+
+    for p in self._walk_params(request.params):
+        if not p.semantic:
+            continue
+
+        semantic = p.semantic.upper()
+
+        if semantic in {
+            "DATA-ID",
+            "DID",
+            "DATA_IDENTIFIER"
+        }:
+            # 1️⃣ coded const directly present
+            if p.coded_const_value:
+                return p.coded_const_value
+
+            # 2️⃣ table-decoded DID (rare but valid)
+            if p.table_key:
+                return p.table_key
+
+    return None
+
+
 def get_service_did_hex(service) -> str:
     """
     Extract DID from a service by finding the DATA-ID param
