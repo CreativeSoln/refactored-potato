@@ -1,3 +1,15 @@
+# Derive DID from already-parsed DATA-ID param
+did_norm = ""
+
+if svc.request and svc.request.params:
+    for p in svc.request.params:
+        if p.semantic == "DATA-ID" and p.codedConstValue:
+            did_norm = self._fmt.normalize_did(p.codedConstValue)
+            break
+
+svc.attrs["didNormalized"] = did_norm
+
+
 title = getattr(s, "shortName", "")
 if did_text:
     title = f"{title} [{did_text}]"
