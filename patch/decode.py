@@ -1,3 +1,20 @@
+coded_value = ""
+
+# Case 1: xsi:type="CODED-CONST"  (MOST IMPORTANT)
+if xsi_type and xsi_type.upper() == "CODED-CONST":
+    coded_value = extract_coded_value(param_el)
+
+# Case 2: legacy explicit <CODED-CONST> child (rare)
+else:
+    codedConst = find_child(param_el, "CODED-CONST")
+    if codedConst is not None:
+        coded_value = extract_coded_value(codedConst)
+
+# Final safety fallback (important)
+if not coded_value:
+    coded_value = extract_coded_value(param_el)
+
+
 def extract_coded_value(scope: Optional[ET.Element]) -> str:
     """
     Extract coded value from ODX PARAM.
