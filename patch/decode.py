@@ -1,3 +1,14 @@
+title = getattr(s, "shortName", "")
+if did_text:
+    title = f"{title} [{did_text}]"
+
+s_item = QTreeWidgetItem([
+    title,
+    getattr(s, "semantic", ""),
+    info_col,
+])
+
+
 def normalize_did(self, raw_did: Optional[str | int]) -> Optional[str]:
     """
     Normalize DID to 4-digit uppercase hex.
