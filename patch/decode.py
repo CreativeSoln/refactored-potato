@@ -1,3 +1,38 @@
+def normalize_did(self, raw_did: Optional[str | int]) -> Optional[str]:
+    """
+    Normalize DID to 4-digit uppercase hex.
+    Correctly handles decimal and hex inputs.
+    """
+    if raw_did is None:
+        return None
+
+    # Integer → decimal
+    if isinstance(raw_did, int):
+        return f"{raw_did & 0xFFFF:04X}"
+
+    s = str(raw_did).strip().lower().replace(" ", "")
+    if not s:
+        return None
+
+    try:
+        # Hex with prefix
+        if s.startswith("0x"):
+            val = int(s, 16)
+
+        # Pure hex (contains a–f)
+        elif any(c in "abcdef" for c in s):
+            val = int(s, 16)
+
+        # Otherwise decimal
+        else:
+            val = int(s, 10)
+
+        return f"{val & 0xFFFF:04X}"
+
+    except Exception:
+        return None
+
+
 coded_value = ""
 
 # Case 1: xsi:type="CODED-CONST"  (MOST IMPORTANT)
