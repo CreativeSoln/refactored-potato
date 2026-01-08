@@ -1,3 +1,13 @@
+# Build a stable, fully-qualified parameter path
+base_path = "/".join(filter(None, [
+    getattr(svc, "layerName", ""),
+    getattr(svc, "shortName", ""),
+    p.parentType,   # REQUEST / POS-RESPONSE / NEG-RESPONSE
+]))
+
+full_path = f"{parent_path}/{pname}" if parent_path else f"{base_path}/{pname}"
+
+
 # Derive DID from already-parsed DATA-ID param
 did_norm = ""
 
