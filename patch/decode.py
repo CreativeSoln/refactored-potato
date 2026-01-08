@@ -1,3 +1,29 @@
+def extract_coded_value(scope: Optional[ET.Element]) -> str:
+    """
+    Extract coded value from ODX PARAM.
+    Supports CODED-VALUE and CODED-CONST (ODX compliant).
+    """
+    if scope is None:
+        return ""
+
+    # 1️⃣ Preferred: CODED-VALUE (your PDX uses this)
+    cv = first_text(scope, ["CODED-VALUE"])
+    if cv:
+        return cv.strip()
+
+    # 2️⃣ Alternate: CODED-CONST (allowed by ODX)
+    cc = first_text(scope, ["CODED-CONST"])
+    if cc:
+        return cc.strip()
+
+    # 3️⃣ Fallback: generic <V> (rare but valid)
+    v = first_text(scope, ["V"])
+    if v:
+        return v.strip()
+
+    return ""
+
+
 coded = (
     self._text(el, "CODED-CONST")
     or self._text(el, "CODED-VALUE")
