@@ -1,3 +1,26 @@
+messages = []
+if svc.request:
+    messages.append(svc.request)
+if svc.posResponses:
+    messages.extend(svc.posResponses)
+if svc.negResponses:
+    messages.extend(svc.negResponses)
+
+for msg in messages:
+    if msg is None or not hasattr(msg, "params"):
+        continue
+
+    for p in msg.params:
+        raw_const = p.physConstValue or p.codedConstValue
+        p.value = self._fmt.format_param_display(raw_const) or ""
+
+        p.attrs["isSelectableFor22"] = self._fmt.is_param_selectable_for_22(
+            svc.sid,
+            p.parentType,
+            p.semantic
+        )
+
+
 from models import OdxParam
 
 def extract_did_from_service(service) -> str | None:
