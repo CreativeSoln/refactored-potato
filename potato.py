@@ -1,264 +1,374 @@
-def _add_params(self, parent_item, params, svc, parent_path=""):
-    for p in params:
-        item = QTreeWidgetItem(parent_item)
-        item.setText(0, p.shortName)
-        item.setText(1, p.semantic)
+from __future__ import annotations
 
-        full_path = f"{parent_path}.{p.shortName}" if parent_path else p.shortName
+from dataclasses import dataclass
+from typing import List
 
-        item.setData(
-            0,
-            Qt.ItemDataRole.UserRole,
-            {
-                "path": full_path,
-                "service": svc.shortName,
-                "param": p,
-            }
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QDialog, QListWidget, QListWidgetItem, QLineEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QDialogButtonBox, QMessageBox, QAbstractItemView, QSizePolicy
+)
+
+@dataclass
+class ParameterSet:
+    display_name: str
+    parameters: List[str]  # ordered
+
+
+class ParameterSetDialog(QDialog):
+    """
+    Dialog that:
+      - Receives a list of parameter names (strings).
+      - Lets the user select one/more parameters and reorder them.
+      - Lets the user type a Display Name.
+      - Allows creating multiple such (Display Name + Ordered Parameters) sets.
+      - Returns all sets on OK via result_sets().
+    """
+    def __init__(self, parameter_list: List[str], parent=None, allow_duplicates: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Build Parameter Sets")
+        self.resize(900, 560)
+
+        self.parameter_list = list(parameter_list)
+        self.allow_duplicates = allow_duplicates
+        self._sets: List[ParameterSet] = []
+
+        # ---------- Left: Available parameters + filter ----------
+        self.filter_edit = QLineEdit(self)
+        self.filter_edit.setPlaceholderText("Filter parameters…")
+
+        self.available_list = QListWidget(self)
+        self.available_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.available_list.setAlternatingRowColors(True)
+        self.available_list.setSortingEnabled(False)
+        for p in self.parameter_list:
+            QListWidgetItem(p, self.available_list)
+
+        # ---------- Middle: transfer + ordering controls ----------
+        self.add_btn = QPushButton(">")
+        self.add_all_btn = QPushButton(">>")
+        self.remove_btn = QPushButton("<")
+        self.clear_sel_btn = QPushButton("Clear")
+        self.up_btn = QPushButton("Up")
+        self.down_btn = QPushButton("Down")
+
+        transfer_col = QVBoxLayout()
+        transfer_col.addWidget(self.add_btn)
+        transfer_col.addWidget(self.add_all_btn)
+        transfer_col.addWidget(self.remove_btn)
+        transfer_col.addWidget(self.clear_sel_btn)
+        transfer_col.addSpacing(16)
+        transfer_col.addWidget(self.up_btn)
+        transfer_col.addWidget(self.down_btn)
+        transfer_col.addStretch(1)
+
+        # ---------- Right: Selected (ordered) ----------
+        self.selected_list = QListWidget(self)
+        self.selected_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.selected_list.setAlternatingRowColors(True)
+        # Drag & drop reorder
+        self.selected_list.setDragEnabled(True)
+        self.selected_list.setAcceptDrops(True)
+        self.selected_list.setDropIndicatorShown(True)
+        self.selected_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+
+        # Double-click shortcuts
+        self.available_list.itemDoubleClicked.connect(self._add_from_available)
+        self.selected_list.itemDoubleClicked.connect(self._remove_from_selected)
+
+        # ---------- Display name + actions to collect sets ----------
+        self.display_label = QLabel("Display name:")
+        self.display_edit = QLineEdit(self)
+        self.display_edit.setPlaceholderText("Enter display name for this set")
+
+        self.add_set_btn = QPushButton("Add set")
+        self.update_set_btn = QPushButton("Update set")
+        self.update_set_btn.setEnabled(False)
+        self.delete_set_btn = QPushButton("Delete set")
+        self.clear_sets_btn = QPushButton("Clear all sets")
+
+        # ---------- Table of collected sets ----------
+        self.sets_table = QTableWidget(0, 2, self)
+        self.sets_table.setHorizontalHeaderLabels(["Display name", "Parameters (in order)"])
+        self.sets_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.sets_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+        vheader = self.sets_table.verticalHeader()
+        if vheader is not None:
+            vheader.setVisible(False)
+
+        header = self.sets_table.horizontalHeader()
+        if header is not None:
+            header.setStretchLastSection(True)
+
+        # ---------- OK/Cancel ----------
+        self.btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self
         )
 
-        # Info column logic stays unchanged
-        # ...
+        # ---------- Layout ----------
+        top_grid = QGridLayout()
+        top_grid.addWidget(QLabel("Available parameters"), 0, 0)
+        top_grid.addWidget(QLabel("Selected parameters (ordered)"), 0, 2)
 
-        if p.children:
-            self._add_params(item, p.children, svc, full_path)
+        left_col = QVBoxLayout()
+        left_col.addWidget(self.filter_edit)
+        left_col.addWidget(self.available_list)
 
+        right_col = QVBoxLayout()
+        right_col.addWidget(self.selected_list)
 
-COMPU-METHOD: CM_WheelSpeed
+        top_grid.addLayout(left_col, 1, 0)
+        top_grid.addLayout(transfer_col, 1, 1)
+        top_grid.addLayout(right_col, 1, 2)
 
-Raw Min / Max:        0 .. 65535
-Physical Min / Max:   0.0 .. 250.0 km/h
+        dn_row = QHBoxLayout()
+        dn_row.addWidget(self.display_label)
+        dn_row.addWidget(self.display_edit)
+        dn_row.addSpacing(20)
+        dn_row.addWidget(self.add_set_btn)
+        dn_row.addWidget(self.update_set_btn)
+        dn_row.addWidget(self.delete_set_btn)
+        dn_row.addWidget(self.clear_sets_btn)
+        dn_row.addStretch(1)
 
-def _compute_compu_min_max(self, compu_method):
-    """
-    Returns:
-        (raw_min, raw_max, phys_min, phys_max)
-    """
-    if not compu_method or not getattr(compu_method, "scales", None):
-        return None, None, None, None
+        main = QVBoxLayout(self)
+        main.addLayout(top_grid)
+        main.addSpacing(10)
+        main.addLayout(dn_row)
+        main.addWidget(self.sets_table, stretch=1)
+        main.addWidget(self.btn_box)
 
-    raw_lows = []
-    raw_highs = []
-    phys_lows = []
-    phys_highs = []
+        # ---------- Wiring ----------
+        self.filter_edit.textChanged.connect(self._apply_filter)
+        self.add_btn.clicked.connect(self._add_selected_from_available)
+        self.add_all_btn.clicked.connect(self._add_all_from_available)
+        self.remove_btn.clicked.connect(self._remove_selected_from_selected)
+        self.clear_sel_btn.clicked.connect(self.selected_list.clear)
+        self.up_btn.clicked.connect(lambda: self._move_selected(-1))
+        self.down_btn.clicked.connect(lambda: self._move_selected(+1))
 
-    for s in compu_method.scales:
-        lo = getattr(s, "lowerLimit", None)
-        hi = getattr(s, "upperLimit", None)
+        self.add_set_btn.clicked.connect(self._on_add_set)
+        self.update_set_btn.clicked.connect(self._on_update_set)
+        self.delete_set_btn.clicked.connect(self._on_delete_set)
+        self.clear_sets_btn.clicked.connect(self._on_clear_sets)
 
-        if lo is not None:
-            raw_lows.append(lo)
-        if hi is not None:
-            raw_highs.append(hi)
+        self.sets_table.itemSelectionChanged.connect(self._on_table_selection_changed)
 
-        # Physical range (linear only)
-        factor = getattr(s, "factor", None)
-        offset = getattr(s, "offset", None) or 0
+        self.btn_box.accepted.connect(self._on_accept)
+        self.btn_box.rejected.connect(self.reject)
 
-        if factor is not None:
-            if lo is not None:
-                phys_lows.append(lo * factor + offset)
-            if hi is not None:
-                phys_highs.append(hi * factor + offset)
+        # Minor size policies
+        self.available_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.selected_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.sets_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    raw_min = min(raw_lows) if raw_lows else None
-    raw_max = max(raw_highs) if raw_highs else None
-    phys_min = min(phys_lows) if phys_lows else None
-    phys_max = max(phys_highs) if phys_highs else None
+    # ---------- Helpers ----------
+    def _apply_filter(self, text: str) -> None:
+        t = text.strip().lower()
+        for i in range(self.available_list.count()):
+            item = self.available_list.item(i)
+            if item is None:
+                continue
+            item.setHidden(t not in item.text().lower())
 
-    return raw_min, raw_max, phys_min, phys_max
+    def _add_from_available(self, item: QListWidgetItem | None) -> None:
+        if item is None:
+            return
+        self._add_to_selected([item.text()])
 
+    def _add_selected_from_available(self) -> None:
+        items = [i.text() for i in self.available_list.selectedItems() if i is not None]
+        if items:
+            self._add_to_selected(items)
 
-def _compute_compu_min_max(self, compu_method):
-    """
-    Returns:
-        (raw_min, raw_max, phys_min, phys_max)
-    """
-    if not compu_method or not getattr(compu_method, "scales", None):
-        return None, None, None, None
+    def _add_all_from_available(self) -> None:
+        items: list[str] = []
+        for i in range(self.available_list.count()):
+            it = self.available_list.item(i)
+            if it is None:
+                continue
+            if not it.isHidden():
+                items.append(it.text())
+        if items:
+            self._add_to_selected(items)
 
-    raw_lows = []
-    raw_highs = []
-    phys_lows = []
-    phys_highs = []
+    def _add_to_selected(self, names: List[str]) -> None:
+        # Build a set of existing item texts safely (guard None)
+        existing: set[str] = set()
+        for i in range(self.selected_list.count()):
+            it = self.selected_list.item(i)
+            if it is None:
+                continue
+            existing.add(it.text())
 
-    for s in compu_method.scales:
-        lo = getattr(s, "lowerLimit", None)
-        hi = getattr(s, "upperLimit", None)
+        for name in names:
+            if self.allow_duplicates or name not in existing:
+                QListWidgetItem(name, self.selected_list)
 
-        if lo is not None:
-            raw_lows.append(lo)
-        if hi is not None:
-            raw_highs.append(hi)
+    def _remove_from_selected(self, item: QListWidgetItem | None) -> None:
+        if item is None:
+            return
+        row = self.selected_list.row(item)
+        self.selected_list.takeItem(row)
 
-        # Physical range (linear only)
-        factor = getattr(s, "factor", None)
-        offset = getattr(s, "offset", None) or 0
+    def _remove_selected_from_selected(self) -> None:
+        for item in self.selected_list.selectedItems():
+            if item is None:
+                continue
+            self._remove_from_selected(item)
 
-        if factor is not None:
-            if lo is not None:
-                phys_lows.append(lo * factor + offset)
-            if hi is not None:
-                phys_highs.append(hi * factor + offset)
+    def _move_selected(self, delta: int) -> None:
+        """Move the first selected row up/down by delta (+1 or -1)."""
+        sel = self.selected_list.selectedItems()
+        if not sel:
+            return
+        item = sel[0]
+        if item is None:
+            return
+        row = self.selected_list.row(item)
+        new_row = max(0, min(self.selected_list.count() - 1, row + delta))
+        if new_row == row:
+            return
+        taken = self.selected_list.takeItem(row)
+        if taken is None:
+            return
+        self.selected_list.insertItem(new_row, taken)
+        self.selected_list.setCurrentRow(new_row)
 
-    raw_min = min(raw_lows) if raw_lows else None
-    raw_max = max(raw_highs) if raw_highs else None
-    phys_min = min(phys_lows) if phys_lows else None
-    phys_max = max(phys_highs) if phys_highs else None
+    def _collect_current_selection(self) -> ParameterSet | None:
+        display_name = self.display_edit.text().strip()
+        if not display_name:
+            QMessageBox.warning(self, "Missing display name", "Please enter a display name.")
+            return None
+        params: list[str] = []
+        for i in range(self.selected_list.count()):
+            it = self.selected_list.item(i)
+            if it is None:
+                continue
+            params.append(it.text())
+        if not params:
+            QMessageBox.warning(self, "No parameters selected", "Please select one or more parameters.")
+            return None
+        return ParameterSet(display_name=display_name, parameters=params)
 
-    return raw_min, raw_max, phys_min, phys_max
+    def _on_add_set(self) -> None:
+        ps = self._collect_current_selection()
+        if ps is None:
+            return
+        # Replace if display name exists
+        for idx, s in enumerate(self._sets):
+            if s.display_name == ps.display_name:
+                r = QMessageBox.question(
+                    self, "Duplicate name",
+                    f"A set named '{ps.display_name}' already exists.\nReplace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if r != QMessageBox.StandardButton.Yes:
+                    return
+                self._sets[idx] = ps
+                self._refresh_table()
+                self._clear_current_builder()
+                return
 
+        self._sets.append(ps)
+        self._refresh_table()
+        self._clear_current_builder()
 
-4️⃣ Visual semantic cues (color + icons)
-Examples
-Semantic	Visual
-SERVICE-ID	🔵 blue
-DATA-ID	🟣 purple
-TABLE-KEY	🟠 orange
-STRUCTURE	📦 folder
-DATA	⚪ normal
+    def _on_update_set(self) -> None:
+        row = self._current_table_row()
+        if row is None:
+            return
+        ps = self._collect_current_selection()
+        if ps is None:
+            return
+        self._sets[row] = ps
+        self._refresh_table()
+        self._clear_current_builder()
 
-Field	Source
-Name	param.shortName
-Full Path	meta["path"]
-Semantic	param.semantic
-Byte Position	param.bytePosition
-Bit Position	param.bitPosition
-Bit Length	param.bitLength
-DOP	param.dopRef
-COMPU-METHOD	param.compuMethodRef
-Unit	param.unit
-Raw Hex	param.rawHex
-Physical Value	param.value
+    def _on_delete_set(self) -> None:
+        row = self._current_table_row()
+        if row is None:
+            return
+        del self._sets[row]
+        self._refresh_table()
+        self._clear_current_builder()
 
-Name	param.shortName
-Full Path	meta["path"]
-Semantic	param.semantic
-Byte Position	param.bytePosition
-Bit Position	param.bitPosition
-Bit Length	param.bitLength
-DOP	param.dopRef
-COMPU-METHOD	param.compuMethodRef
-Unit	param.unit
-Raw Hex	param.rawHex
-Physical Value	param.value
-1️⃣ Wire tree selection → details panel (ONE line)
-🔽 Add this in build_ui() (no structure change)
-self.tree.currentItemChanged.connect(self.on_tree_selection_changed)
+    def _on_clear_sets(self) -> None:
+        if not self._sets:
+            return
+        r = QMessageBox.question(self, "Clear all sets", "Remove all sets?",
+                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if r == QMessageBox.StandardButton.Yes:
+            self._sets.clear()
+            self._refresh_table()
 
-2️⃣ Add a helper to clear the panel
-🔽 Add inside MainWindow
-def _clear_details(self):
-    while self.details.rowCount():
-        self.details.removeRow(0)
+    def _current_table_row(self) -> int | None:
+        sm = self.sets_table.selectionModel()
+        if sm is None:
+            return None
+        rows = sm.selectedRows()
+        return rows[0].row() if rows else None
 
-3️⃣ Add the detail panel renderer (CORE FEATURE)
-🔽 Add inside MainWindow
-def on_tree_selection_changed(self, item, _prev):
-    self._clear_details()
+    def _on_table_selection_changed(self) -> None:
+        """Load the selected set into the builder for editing."""
+        row = self._current_table_row()
+        self.update_set_btn.setEnabled(row is not None)
+        if row is None:
+            return
+        ps = self._sets[row]
+        # Load into editor
+        self.display_edit.setText(ps.display_name)
+        self.selected_list.clear()
+        for p in ps.parameters:
+            QListWidgetItem(p, self.selected_list)
 
-    if item is None:
-        return
+    def _refresh_table(self) -> None:
+        self.sets_table.setRowCount(0)
+        for s in self._sets:
+            r = self.sets_table.rowCount()
+            self.sets_table.insertRow(r)
+            self.sets_table.setItem(r, 0, QTableWidgetItem(s.display_name))
+            self.sets_table.setItem(r, 1, QTableWidgetItem(", ".join(s.parameters)))
 
-    meta = item.data(0, Qt.ItemDataRole.UserRole)
+    def _clear_current_builder(self) -> None:
+        self.display_edit.clear()
+        self.selected_list.clear()
+        self.available_list.clearSelection()
 
-    # --------------------------------------------------
-    # Case 1: PARAM node (dict metadata)
-    # --------------------------------------------------
-    if isinstance(meta, dict):
-        self.details.addRow("Name:", QLabel(item.text(0)))
-        self.details.addRow("Full Path:", QLabel(meta.get("path", "")))
-        self.details.addRow("Service:", QLabel(meta.get("service", "")))
+    def _on_accept(self) -> None:
+        if not self._sets:
+            QMessageBox.warning(self, "No sets", "Please add at least one set before clicking OK.")
+            return
+        self.accept()
 
-        param = meta.get("param")  # optional, if you store it
+    # ---------- Public API ----------
+    def result_sets(self) -> List[ParameterSet]:
+        """Return the collected (Display Name + Ordered Parameters) sets."""
+        return list(self._sets)
 
-        if param:
-            self._add_param_details(param)
-        return
+if __name__ == "__main__":
+    import sys
+    from PyQt6.QtWidgets import QApplication, QDialog
 
-    # --------------------------------------------------
-    # Case 2: SERVICE / LAYER node (object metadata)
-    # --------------------------------------------------
-    self.details.addRow("Name:", QLabel(item.text(0)))
-    self.details.addRow("Type:", QLabel(type(meta).__name__))
+    parameter_list = [
+        "PRODUCTIONDATE",
+        "BARCODE",
+        "PARTNUMBER",
+        "DIAGNOSTIC_IDENTIFIER",
+        "ECU_SW_VERSION",
+        "ECU_HW_VERSION",
+    ]
 
-4️⃣ Render PARAM-specific fields (clean & isolated)
-🔽 Add inside MainWindow
-def _add_param_details(self, p):
-    def add(label, value):
-        if value is not None and value != "":
-            self.details.addRow(label, QLabel(str(value)))
-
-    add("Semantic", p.semantic)
-    add("Byte Position", p.bytePosition)
-    add("Bit Position", p.bitPosition)
-    add("Bit Length", p.bitLength)
-    add("DOP Ref", p.dopRef)
-    add("COMPU-METHOD", p.compuMethodRef)
-    add("Unit", getattr(p, "unit", None))
-    add("Raw Hex", getattr(p, "rawHex", None))
-    add("Physical Value", getattr(p, "value", None))
-
-5️⃣ ONE SMALL but IMPORTANT change in tree population
-
-When creating param tree items, add the param object to metadata.
-
-🔴 CURRENT (you already do this)
-item.setData(0, Qt.ItemDataRole.UserRole, {
-    "path": path,
-    "service": svc.shortName,
-})
-
-🟢 MODIFY (add ONE key)
-item.setData(0, Qt.ItemDataRole.UserRole, {
-    "path": path,
-    "service": svc.shortName,
-    "param": p,   # ← THIS enables full detail panel
-})
-
-
-That’s it. No other structural change.
-
-✅ What this gives you immediately
-
-✔ Clicking a PARAM shows full technical details
-✔ Clicking SERVICE / LAYER still works
-✔ Works before and after decoding
-✔ No duplication of logic
-✔ No parser touch
-✔ Easy to extend
-
-🧪 Verification checklist
-
-After adding this:
-
-Click SERVICE-ID → see semantic + value
-
-Click DATA param → see byte/bit info
-
-Decode response → click param → value shown
-
-No crashes on layer/service clicks
-
-🔒 Why this is the correct design
-
-UI owns presentation
-
-Parser owns structure
-
-Decoder owns values
-
-Detail panel is read-only, safe, and future-proof
-
-🔜 Easy follow-ups (optional)
-
-Once this is in, the next upgrades are trivial:
-
-Copy any field with one click
-
-Show min/max from COMPU-METHOD
-
-Show decoded + raw side by side
-
-Add “Go to DOP” jump
-
-If you want, tell me which one next and I’ll give you another drop-in patch.
+    app = QApplication(sys.argv)
+    dlg = ParameterSetDialog(parameter_list, parent=None, allow_duplicates=False)
+    if dlg.exec() == QDialog.DialogCode.Accepted:
+        sets = dlg.result_sets()  # uses the method version
+        print("Received parameter sets:")
+        for s in sets:
+            print(f"  - {s.display_name}: {s.parameters}")
+    else:
+        print("Dialog cancelled.")
+    sys.exit(0)
